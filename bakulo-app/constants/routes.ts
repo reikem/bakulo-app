@@ -9,6 +9,7 @@ export const ROUTES = {
     EXPLORE: '/(tabs)/explore',
     HISTORY: '/(tabs)/history',
     SETTINGS: '/(tabs)/settings',
+    FOOD_LOG: '/FoodLogScreen', // Nueva ruta para Food Log
   },
   SETTINGS: {
     // NOTA: Aquí agregamos "Screen" porque así se llaman tus archivos

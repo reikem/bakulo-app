@@ -106,7 +106,8 @@ export default function DashboardScreen() {
       <BloodSugarChart />
 
       {/* Quick Access Section */}
-      <View style={styles.sectionHeader}>
+    {/* Quick Access Section */}
+    <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Quick Access</Text>
       </View>
       
@@ -120,17 +121,19 @@ export default function DashboardScreen() {
           label="Reports" 
           onPress={() => router.push('/reports')} 
         />
+        
+        {/* MODIFICADO: Ahora navega a la pantalla de Food Log */}
         <QuickAction 
           icon={<Utensils color="#86d0ef" size={24} />} 
           label="Food Log" 
+          onPress={() => router.push('/FoodLogScreen')} 
         />
+
         <QuickAction 
           icon={<Settings color="#86d0ef" size={24} />} 
           label="Adjust" 
         />
       </View>
-
-      <View style={{ height: 120 }} />
       
     </ScrollView>
   );
