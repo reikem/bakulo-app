@@ -9,7 +9,8 @@ export const ROUTES = {
     EXPLORE: '/(tabs)/explore',
     HISTORY: '/(tabs)/history',
     SETTINGS: '/(tabs)/settings',
-    FOOD_LOG: '/FoodLogScreen', // Nueva ruta para Food Log
+    FOOD_LOG: '/FoodLogScreen', 
+    LOG_GLUCOSE: '/(tabs)/LogGlucoseScreen',// Nueva ruta para Food Log
   },
   SETTINGS: {
     // NOTA: Aquí agregamos "Screen" porque así se llaman tus archivos
@@ -17,6 +18,12 @@ export const ROUTES = {
     SUPPORT: '/SupportScreen',
     SECURITY_DETAIL: '/SecurityScreen',
     NOTIFICATIONS: '/NotificationsScreen',
+  },
+  INSIGHTS: {
+    // Eliminamos "Screen" y agregamos "/(tabs)/" porque ahí están tus archivos
+    MAIN: '/(tabs)/InsightsScreen', 
+    NUTRITION_LIST: '/(tabs)/NutritionList', 
+    ARTICLE_DETAIL: '/(tabs)/ArticleDetail',
   },
   HEALTH: {
     EXPORT: '/export',
