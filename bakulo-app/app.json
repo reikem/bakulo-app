@@ -53,7 +53,9 @@
       ],
       "expo-sqlite",
       "@react-native-community/datetimepicker",
-      "react-native-ble-plx"
+      "react-native-ble-plx",
+      "react-native-health",
+      "react-native-health-connect"
     ],
     "experiments": {
       "typedRoutes": true,

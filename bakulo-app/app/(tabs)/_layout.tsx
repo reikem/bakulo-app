@@ -1,117 +1,111 @@
-import { Tabs } from 'expo-router';
+/**
+ * app/(tabs)/_layout.tsx — Layout de tabs
+ *
+ * ✅ Solo define la barra de navegación inferior
+ * ✅ NO repite providers (ya están en app/_layout.tsx)
+ * ✅ Las pantallas dentro de (tabs) que no son tabs reales
+ *    (InsightsScreen, DailyTasksScreen, etc.) se ocultan de la tab bar
+ */
+
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
-import { TopAppBar } from '../../components/ui/TopAppBar';
-import { CustomTabBar } from '../../components/ui/TabBar';
+import { Tabs } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { Platform } from 'react-native';
 
-export default function TabLayout() {
+type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
+
+function TabIcon({ name, focused }: { name: IoniconsName; focused: boolean }) {
   return (
-    <View style={styles.container}>
-      {/* Única instancia del Header para todas las pestañas. 
-          Si alguna pantalla específica no debe llevarlo, 
-          habría que moverlo dentro de cada pantalla individual.
-      */}
-      <TopAppBar />
-
-      <Tabs
-        tabBar={(props) => <CustomTabBar {...props} />}
-        screenOptions={{
-          headerShown: false, // Ocultamos el header por defecto de los Tabs
-          tabBarActiveTintColor: '#006782',
-          tabBarInactiveTintColor: '#6f787d',
-        }}>
-        
-        {/* --- PANTALLAS PRINCIPALES (Visibles en el TabBar) --- */}
-        
-        <Tabs.Screen 
-          name="index" 
-          options={{ 
-            title: 'Dashboard' 
-          }} 
-        />
-        
-        <Tabs.Screen 
-          name="history" 
-          options={{ 
-            title: 'History' 
-          }} 
-        />
-        
-        <Tabs.Screen 
-          name="advice" 
-          options={{ 
-            title: 'Advice' 
-          }} 
-        />
-        
-        <Tabs.Screen 
-          name="explore" 
-          options={{ 
-            title: 'Explore' 
-          }} 
-        />
-        
-        <Tabs.Screen 
-          name="settings" 
-          options={{ 
-            title: 'Settings' 
-          }} 
-        />
-
-        {/* --- PANTALLAS DE NAVEGACIÓN INTERNA (Ocultas en el TabBar) --- */}
-        {/* Usamos href: null para que existan en el sistema de rutas 
-            pero no generen un botón en la barra inferior.
-        */}
-
-        <Tabs.Screen 
-          name="LogGlucoseScreen" 
-          options={{ 
-            href: null,
-            title: 'Log Glucose'
-          }} 
-        />
-
-        <Tabs.Screen 
-          name="InsightsScreen" 
-          options={{ 
-            href: null,
-            title: 'Insights'
-          }} 
-        />
-
-        <Tabs.Screen 
-          name="NutritionList" 
-          options={{ 
-            href: null,
-            title: 'Nutrition'
-          }} 
-        />
-
-        <Tabs.Screen 
-          name="ArticleDetail" 
-          options={{ 
-            href: null,
-            title: 'Article Detail'
-          }} 
-        />
-        <Tabs.Screen 
-  name="DailyTasksScreen" 
-  options={{ 
-    href: null,
-    title: 'Daily Tasks'
-  }} 
-/>
-
-        {/* Agrega aquí cualquier otra pantalla que esté dentro de la carpeta (tabs) */}
-
-      </Tabs>
-    </View>
+    <Ionicons
+      name={focused ? name : `${name}-outline` as IoniconsName}
+      size={24}
+      color={focused ? '#6C63FF' : '#8E8E93'}
+    />
   );
 }
 
-const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#121212' 
-  },
-});
+export default function TabsLayout() {
+  return (
+    <Tabs
+      screenOptions={{
+        headerShown: false,
+        tabBarStyle: {
+          backgroundColor: '#0F0F1A',
+          borderTopColor: '#1E1E2E',
+          borderTopWidth: 1,
+          height: Platform.OS === 'ios' ? 85 : 65,
+          paddingBottom: Platform.OS === 'ios' ? 25 : 10,
+          paddingTop: 8,
+        },
+        tabBarActiveTintColor: '#6C63FF',
+        tabBarInactiveTintColor: '#8E8E93',
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: '500',
+        },
+      }}
+    >
+      {/* ── Tabs visibles ──────────────────────────────────────────────── */}
+
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: 'Dashboard',
+          tabBarIcon: ({ focused }) => <TabIcon name="home" focused={focused} />,
+        }}
+      />
+      <Tabs.Screen
+        name="history"
+        options={{
+          title: 'Historial',
+          tabBarIcon: ({ focused }) => <TabIcon name="time" focused={focused} />,
+        }}
+      />
+      <Tabs.Screen
+        name="advice"
+        options={{
+          title: 'Consejos',
+          tabBarIcon: ({ focused }) => <TabIcon name="bulb" focused={focused} />,
+        }}
+      />
+      <Tabs.Screen
+        name="explore"
+        options={{
+          title: 'Explorar',
+          tabBarIcon: ({ focused }) => <TabIcon name="compass" focused={focused} />,
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: 'Ajustes',
+          tabBarIcon: ({ focused }) => <TabIcon name="settings" focused={focused} />,
+        }}
+      />
+
+      {/* ── Pantallas dentro de (tabs) que NO aparecen en la tab bar ───── */}
+
+      <Tabs.Screen
+        name="InsightsScreen"
+        options={{ href: null }}
+      />
+      <Tabs.Screen
+        name="DailyTasksScreen"
+        options={{ href: null }}
+      />
+      <Tabs.Screen
+        name="ArticleDetail"
+        options={{ href: null }}
+      />
+      <Tabs.Screen
+        name="NutritionList"
+        options={{ href: null }}
+      />
+      <Tabs.Screen
+        name="LogGlucoseScreen"
+        options={{ href: null }}
+      />
+
+    </Tabs>
+  );
+}

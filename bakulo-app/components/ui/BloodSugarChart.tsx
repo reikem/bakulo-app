@@ -1,159 +1,351 @@
-import React, { useState, useMemo } from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
-import Svg, { Path, Defs, LinearGradient, Stop, Line, Circle, Text as SvgText, G, Rect } from 'react-native-svg';
+/**
+ * BloodSugarChart.tsx
+ * 
+ * Gráfico del Dashboard que muestra datos REALES del GlucoseStore.
+ * Se actualiza automáticamente al registrar nuevos valores.
+ */
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
+import { Download, TrendingUp, TrendingDown, Minus } from 'lucide-react-native';
+import { useGlucose } from '@/store/GlucoseStore';
 
-// Interfaces para tipado de datos
-interface ChartPoint {
-  x: number;     // Posición 0 a 400 en el viewBox
-  y: number;     // Posición 0 a 150 en el viewBox
-  val: string;   // Valor a mostrar (ej: "105" o "25g")
-  time: string;  // Etiqueta de tiempo (ej: "12 PM")
-  status?: 'Normal' | 'High' | 'Low';
-}
 
-interface BloodSugarChartProps {
-  glucoseData?: ChartPoint[];
-  carbsData?: ChartPoint[];
-}
+type Range = 'Semanal' | 'Mensual';
 
-export const BloodSugarChart = ({ 
-  glucoseData = DEFAULT_GLUCOSE, 
-  carbsData = DEFAULT_CARBS 
-}: BloodSugarChartProps) => {
-  const [mode, setMode] = useState<'glucose' | 'carbs'>('glucose');
-  const [selectedIndex, setSelectedIndex] = useState(glucoseData.length - 1);
+export const BloodSugarChart = () => {
+  const [range, setRange] = useState<Range>('Semanal');
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const { getWeeklyData, getMonthlyData, latestEntry, entries } = useGlucose();
 
-  const currentPoints = mode === 'glucose' ? glucoseData : carbsData;
-  const color = mode === 'glucose' ? "#006782" : "#a4f4b7";
-  const selectedPoint = currentPoints[selectedIndex] || currentPoints[0];
+  const data = range === 'Semanal' ? getWeeklyData() : getMonthlyData();
 
-  // Generamos el Path de forma dinámica basado en los puntos recibidos
-  const pathData = useMemo(() => {
-    return currentPoints.reduce((acc, point, i) => {
-      return i === 0 ? `M${point.x},${point.y}` : `${acc} L${point.x},${point.y}`;
-    }, "");
-  }, [currentPoints]);
+  // Calcular promedio del período visible
+  const visibleValues = data.filter(d => d.value > 0).map(d => d.value);
+  const avg = visibleValues.length > 0
+    ? Math.round(visibleValues.reduce((a, b) => a + b, 0) / visibleValues.length)
+    : 0;
 
-  const areaData = `${pathData} L${currentPoints[currentPoints.length - 1].x},150 L${currentPoints[0].x},150 Z`;
+  // Tendencia: comparar primera mitad vs segunda mitad
+  const half = Math.floor(visibleValues.length / 2);
+  const firstHalf  = visibleValues.slice(0, half);
+  const secondHalf = visibleValues.slice(half);
+  const avgFirst  = firstHalf.length  ? firstHalf.reduce((a,b)=>a+b,0)/firstHalf.length   : 0;
+  const avgSecond = secondHalf.length ? secondHalf.reduce((a,b)=>a+b,0)/secondHalf.length : 0;
+  const trend = avgSecond > avgFirst + 5 ? 'up' : avgSecond < avgFirst - 5 ? 'down' : 'stable';
+
+  const TrendIcon = trend === 'up' ? TrendingUp : trend === 'down' ? TrendingDown : Minus;
+  const trendColor = trend === 'up' ? '#f59e0b' : trend === 'down' ? '#86d0ef' : '#22c55e';
+
+  // Color de barra según valor glucémico
+  const barColor = (value: number) => {
+    if (value === 0)   return 'rgba(255,255,255,0.04)';
+    if (value < 70)    return '#ef4444';
+    if (value <= 140)  return '#86d0ef';
+    if (value <= 199)  return '#f59e0b';
+    return '#ef4444';
+  };
 
   return (
-    <View style={styles.container}>
+    <View style={styles.card}>
+      {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Analytics</Text>
-        <View style={styles.tabs}>
-          <TouchableOpacity 
-            onPress={() => { setMode('glucose'); setSelectedIndex(glucoseData.length - 1); }}
-            style={mode === 'glucose' ? styles.tabActive : styles.tabInactive}
-          >
-            <Text style={mode === 'glucose' ? styles.tabTextActive : styles.tabTextInactive}>Glucose</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            onPress={() => { setMode('carbs'); setSelectedIndex(carbsData.length - 1); }}
-            style={mode === 'carbs' ? styles.tabActive : styles.tabInactive}
-          >
-            <Text style={mode === 'carbs' ? styles.tabTextActive : styles.tabTextInactive}>Carbs</Text>
-          </TouchableOpacity>
+        <View>
+          <Text style={styles.cardLabel}>GLUCOSE TRENDS</Text>
+          <View style={styles.avgRow}>
+            <Text style={styles.avgValue}>{avg > 0 ? `${avg}` : '—'}</Text>
+            <Text style={styles.avgUnit}> mg/dL avg</Text>
+            <View style={[styles.trendBadge, { backgroundColor: `${trendColor}18` }]}>
+              <TrendIcon color={trendColor} size={12} />
+              <Text style={[styles.trendText, { color: trendColor }]}>
+                {trend === 'up' ? 'Rising' : trend === 'down' ? 'Falling' : 'Stable'}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.headerRight}>
+          {/* Toggle Semanal / Mensual */}
+          <View style={styles.rangeToggle}>
+            {(['Semanal', 'Mensual'] as Range[]).map(r => (
+              <TouchableOpacity
+                key={r}
+                style={[styles.rangeBtn, range === r && styles.rangeBtnActive]}
+                onPress={() => setRange(r)}
+              >
+                <Text style={[styles.rangeBtnText, range === r && styles.rangeBtnTextActive]}>
+                  {r}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
       </View>
 
-      <View style={styles.chartWrapper}>
-        <Svg width="100%" height={150} viewBox="0 0 400 150" preserveAspectRatio="none">
-          <Defs>
-            <LinearGradient id="fillGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-              <Stop offset="0%" stopColor={color} stopOpacity="0.3" />
-              <Stop offset="100%" stopColor={color} stopOpacity="0" />
-            </LinearGradient>
-          </Defs>
+      {/* Líneas de referencia */}
+      <View style={styles.chartArea}>
+        {/* Zona de rango normal */}
+        <View style={styles.normalZone} />
+        <Text style={styles.refLabel70}>70</Text>
+        <Text style={styles.refLabel140}>140</Text>
 
-          {/* Guías Horizontales */}
-          {[30, 75, 120].map(y => (
-            <Line key={y} x1="0" y1={y} x2="400" y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
-          ))}
+        {/* Barras */}
+        <View style={styles.barsRow}>
+          {data.map((item, index) => {
+            const isHovered = hoveredIndex === index;
+            const color = barColor(item.value);
+            const hasData = item.value > 0;
 
-          <Path d={areaData} fill="url(#fillGrad)" />
-          <Path d={pathData} fill="none" stroke={color} strokeWidth="3" strokeLinejoin="round" />
+            return (
+              <View key={`${range}-${index}`} style={styles.barWrapper}>
+                {/* Tooltip */}
+                {isHovered && hasData && (
+                  <View style={[styles.tooltip, { borderColor: color }]}>
+                    <Text style={[styles.tooltipValue, { color }]}>{item.value}</Text>
+                    <Text style={styles.tooltipUnit}>mg/dL</Text>
+                  </View>
+                )}
 
-          {/* Marcador de punto seleccionado */}
-          <G>
-            <Circle 
-              cx={selectedPoint.x} 
-              cy={selectedPoint.y} 
-              r="6" 
-              fill={selectedPoint.status === 'High' ? '#ba1a1a' : color} 
-              stroke="#1d2426" 
-              strokeWidth="2" 
-            />
-            <SvgText 
-              x={selectedPoint.x > 300 ? selectedPoint.x - 50 : selectedPoint.x + 12} 
-              y={selectedPoint.y - 12} 
-              fill="#f5fafb" 
-              fontSize="12" 
-              fontWeight="bold"
-            >
-              {selectedPoint.val}
-            </SvgText>
-          </G>
+                {/* Barra */}
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  style={styles.barTouchable}
+                  {...(Platform.OS === 'web'
+                    ? { onMouseEnter: () => setHoveredIndex(index), onMouseLeave: () => setHoveredIndex(null) }
+                    : { onPressIn: () => setHoveredIndex(index), onPressOut: () => setHoveredIndex(null) }
+                  )}
+                >
+                  <View style={styles.barTrack}>
+                    <View
+                      style={[
+                        styles.barFill,
+                        {
+                          height: `${item.h}%`,
+                          backgroundColor: color,
+                          opacity: isHovered ? 1 : hasData ? 0.75 : 1,
+                          borderRadius: 6,
+                        },
+                      ]}
+                    />
+                  </View>
+                </TouchableOpacity>
 
-          {/* Zonas táctiles invisibles */}
-          {currentPoints.map((p, i) => (
-            <Rect
-              key={i}
-              x={p.x - 20}
-              y="0"
-              width="40"
-              height="150"
-              fill="transparent"
-              onPress={() => setSelectedIndex(i)}
-            />
-          ))}
-        </Svg>
-
-        <View style={styles.timeLabels}>
-          {currentPoints.map((p, i) => (
-            <TouchableOpacity key={i} onPress={() => setSelectedIndex(i)}>
-              <Text style={[
-                styles.timeText, 
-                selectedIndex === i && { color: color, fontWeight: '900' }
-              ]}>
-                {p.time}
-              </Text>
-            </TouchableOpacity>
-          ))}
+                {/* Etiqueta día/mes */}
+                <Text style={[styles.barLabel, isHovered && { color: '#ecf2f3' }]}>
+                  {item.label}
+                </Text>
+              </View>
+            );
+          })}
         </View>
+      </View>
+
+      {/* Leyenda */}
+      <View style={styles.legend}>
+        <LegendItem color="#86d0ef" label="Normal (70–140)" />
+        <LegendItem color="#f59e0b" label="Elevado" />
+        <LegendItem color="#ef4444" label="Crítico" />
       </View>
     </View>
   );
 };
 
-// DATOS POR DEFECTO (Mock Data)
-const DEFAULT_GLUCOSE: ChartPoint[] = [
-  { x: 0, y: 90, val: "95", time: "12AM" },
-  { x: 100, y: 110, val: "82", time: "6AM" },
-  { x: 200, y: 50, val: "155", time: "12PM", status: 'High' },
-  { x: 300, y: 100, val: "110", time: "6PM" },
-  { x: 400, y: 80, val: "102", time: "Now" }
-];
-
-const DEFAULT_CARBS: ChartPoint[] = [
-  { x: 0, y: 140, val: "0g", time: "12AM" },
-  { x: 100, y: 80, val: "45g", time: "6AM" },
-  { x: 200, y: 60, val: "60g", time: "12PM" },
-  { x: 300, y: 130, val: "15g", time: "6PM" },
-  { x: 400, y: 110, val: "20g", time: "Now" }
-];
+const LegendItem = ({ color, label }: { color: string; label: string }) => (
+  <View style={styles.legendItem}>
+    <View style={[styles.legendDot, { backgroundColor: color }]} />
+    <Text style={styles.legendText}>{label}</Text>
+  </View>
+);
 
 const styles = StyleSheet.create({
-  container: { marginTop: 24 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingHorizontal: 4 },
-  title: { fontSize: 18, fontWeight: '800', color: '#c4ebe0' },
-  tabs: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 100, padding: 4 },
-  tabActive: { backgroundColor: '#c4ebe0', borderRadius: 100, paddingHorizontal: 12, paddingVertical: 6 },
-  tabInactive: { paddingHorizontal: 12, paddingVertical: 6 },
-  tabTextActive: { color: '#00201a', fontSize: 10, fontWeight: '800' },
-  tabTextInactive: { color: '#6f787d', fontSize: 10, fontWeight: '700' },
-  chartWrapper: { backgroundColor: '#1d2426', borderRadius: 32, padding: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
-  timeLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 15 },
-  timeText: { color: '#6f787d', fontSize: 9, fontWeight: '600' }
+  card: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 32,
+    padding: 22,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 20,
+  },
+  cardLabel: {
+    color: '#42655d',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    marginBottom: 4,
+  },
+  avgRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 4,
+  },
+  avgValue: {
+    color: '#86d0ef',
+    fontSize: 28,
+    fontWeight: '800',
+  },
+  avgUnit: {
+    color: '#6f787d',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  trendBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 100,
+    marginLeft: 4,
+  },
+  trendText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  headerRight: {
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  rangeToggle: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    padding: 3,
+  },
+  rangeBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 9,
+  },
+  rangeBtnActive: {
+    backgroundColor: '#006782',
+  },
+  rangeBtnText: {
+    color: '#6f787d',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  rangeBtnTextActive: {
+    color: 'white',
+  },
+
+  // Área del gráfico
+  chartArea: {
+    height: 130,
+    position: 'relative',
+    marginBottom: 8,
+  },
+  normalZone: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    // Zona verde aprox 70-140 = 30%-70% del gráfico
+    top: '25%',
+    height: '40%',
+    backgroundColor: 'rgba(34,197,94,0.04)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(34,197,94,0.15)',
+  },
+  refLabel70: {
+    position: 'absolute',
+    right: 0,
+    bottom: '28%',
+    color: 'rgba(34,197,94,0.4)',
+    fontSize: 8,
+    fontWeight: '700',
+  },
+  refLabel140: {
+    position: 'absolute',
+    right: 0,
+    top: '22%',
+    color: 'rgba(34,197,94,0.4)',
+    fontSize: 8,
+    fontWeight: '700',
+  },
+  barsRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    height: '100%',
+    paddingRight: 16,
+  },
+  barWrapper: {
+    flex: 1,
+    alignItems: 'center',
+    height: '100%',
+    justifyContent: 'flex-end',
+    position: 'relative',
+  },
+  barTouchable: {
+    width: '70%',
+    height: '85%',
+    justifyContent: 'flex-end',
+  },
+  barTrack: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  barFill: {
+    width: '100%',
+  },
+  barLabel: {
+    color: '#6f787d',
+    fontSize: 9,
+    fontWeight: '700',
+    marginTop: 6,
+    letterSpacing: 0.3,
+  },
+
+  // Tooltip
+  tooltip: {
+    position: 'absolute',
+    top: -46,
+    backgroundColor: '#1d2426',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    alignItems: 'center',
+    zIndex: 10,
+    minWidth: 36,
+  },
+  tooltipValue: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  tooltipUnit: {
+    color: '#6f787d',
+    fontSize: 8,
+    fontWeight: '600',
+  },
+
+  // Leyenda
+  legend: {
+    flexDirection: 'row',
+    gap: 14,
+    marginTop: 4,
+    flexWrap: 'wrap',
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  legendDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  legendText: {
+    color: '#6f787d',
+    fontSize: 10,
+    fontWeight: '600',
+  },
 });
