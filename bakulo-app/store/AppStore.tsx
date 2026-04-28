@@ -132,6 +132,52 @@ export interface AlertThresholds {
   medReminders: boolean;
 }
 
+// ─── TASKS ────────────────────────────────────────────────────────────────────
+
+export type TaskFrequency = 'daily' | 'weekly' | 'monthly';
+export type TaskCategory  = 'glucose' | 'exercise' | 'meal' | 'medication' | 'other';
+
+export interface Task {
+  id: string;
+  title: string;
+  description: string;
+  frequency: TaskFrequency;
+  category: TaskCategory;
+  targetTime?: string;      // "08:00" — hora objetivo
+  targetValue?: number;     // ej: 8 lecturas/día
+  createdAt: Date;
+  active: boolean;
+}
+
+export interface TaskCompletion {
+  id: string;
+  taskId: string;
+  completedAt: Date;
+  note?: string;
+}
+
+// ─── REWARDS ─────────────────────────────────────────────────────────────────
+
+export interface Reward {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;             // emoji
+  xpRequired: number;
+  unlockedAt?: Date;        // undefined = locked
+  category: 'streak' | 'readings' | 'exercise' | 'meals' | 'medication' | 'special';
+}
+
+// ─── STREAK ───────────────────────────────────────────────────────────────────
+
+export interface StreakData {
+  currentStreak: number;    // días consecutivos con al menos 1 lectura
+  longestStreak: number;
+  totalReadings: number;
+  totalXP: number;
+  level: number;            // 1–10
+}
+
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
 const isSameDay = (a: Date, b: Date) =>
@@ -175,7 +221,42 @@ const INITIAL_NOTIFICATIONS: NotificationEntry[] = [
   { id: 'n3', title: 'Recordatorio de Comida', body: 'Recuerda registrar tu almuerzo.', type: 'reminder', timestamp: makeDate(0, 12, 0), read: false },
 ];
 
-// ─── CONTEXT VALUE TYPE ───────────────────────────────────────────────────────
+// ─── INITIAL TASKS ───────────────────────────────────────────────────────────
+
+const INITIAL_TASKS: Task[] = [
+  { id: 't1', title: 'Lectura en ayunas',     description: 'Mide tu glucosa antes del desayuno',     frequency: 'daily',   category: 'glucose',    targetTime: '08:00', createdAt: new Date(), active: true },
+  { id: 't2', title: 'Lectura posprandial',   description: 'Mide 2h después del almuerzo',           frequency: 'daily',   category: 'glucose',    targetTime: '14:00', createdAt: new Date(), active: true },
+  { id: 't3', title: 'Tomar medicación',      description: 'No olvides tu dosis matutina',           frequency: 'daily',   category: 'medication', targetTime: '08:15', createdAt: new Date(), active: true },
+  { id: 't4', title: 'Ejercicio semanal',     description: 'Al menos 30 min de actividad física',    frequency: 'weekly',  category: 'exercise',   targetValue: 3,      createdAt: new Date(), active: true },
+  { id: 't5', title: 'Control médico',        description: 'Revisión mensual con tu médico',         frequency: 'monthly', category: 'other',                           createdAt: new Date(), active: true },
+  { id: 't6', title: 'Registrar desayuno',    description: 'Anota lo que comiste en el desayuno',    frequency: 'daily',   category: 'meal',       targetTime: '09:00', createdAt: new Date(), active: true },
+];
+
+const INITIAL_COMPLETIONS: TaskCompletion[] = [
+  { id: 'c1', taskId: 't1', completedAt: makeDate(0, 8, 5)  },
+  { id: 'c2', taskId: 't3', completedAt: makeDate(0, 8, 20) },
+  { id: 'c3', taskId: 't1', completedAt: makeDate(1, 8, 10) },
+  { id: 'c4', taskId: 't3', completedAt: makeDate(1, 8, 15) },
+  { id: 'c5', taskId: 't1', completedAt: makeDate(2, 7, 55) },
+  { id: 'c6', taskId: 't4', completedAt: makeDate(2, 18, 0) },
+  { id: 'c7', taskId: 't1', completedAt: makeDate(3, 8, 30) },
+  { id: 'c8', taskId: 't6', completedAt: makeDate(0, 9, 15) },
+];
+
+// ─── INITIAL REWARDS ─────────────────────────────────────────────────────────
+
+const INITIAL_REWARDS: Reward[] = [
+  { id: 'r1',  title: 'Primera Lectura',    description: 'Registraste tu primera glucosa',                 icon: '🩸', xpRequired: 10,   category: 'readings',    unlockedAt: makeDate(6) },
+  { id: 'r2',  title: 'Racha de 3 días',    description: '3 días consecutivos con lecturas',               icon: '🔥', xpRequired: 50,   category: 'streak',      unlockedAt: makeDate(4) },
+  { id: 'r3',  title: 'Deportista',         description: 'Registraste 5 ejercicios',                       icon: '🏃', xpRequired: 100,  category: 'exercise',    unlockedAt: makeDate(2) },
+  { id: 'r4',  title: 'Racha de 7 días',    description: '7 días consecutivos con lecturas',               icon: '⚡', xpRequired: 150,  category: 'streak',      unlockedAt: undefined   },
+  { id: 'r5',  title: 'Nutricionista',      description: 'Registraste 10 comidas',                         icon: '🥗', xpRequired: 200,  category: 'meals',       unlockedAt: undefined   },
+  { id: 'r6',  title: 'Constante',          description: '30 días consecutivos con lecturas',               icon: '🏆', xpRequired: 500,  category: 'streak',      unlockedAt: undefined   },
+  { id: 'r7',  title: 'En Control',         description: 'Mantén 7 días seguidos en rango 70-140',         icon: '🎯', xpRequired: 300,  category: 'readings',    unlockedAt: undefined   },
+  { id: 'r8',  title: 'Medicado Puntual',   description: 'Tomaste tu medicación 14 días seguidos',         icon: '💊', xpRequired: 250,  category: 'medication',  unlockedAt: undefined   },
+  { id: 'r9',  title: 'Maestro del Control',description: '100 lecturas registradas',                       icon: '🌟', xpRequired: 1000, category: 'readings',    unlockedAt: undefined   },
+  { id: 'r10', title: 'Superhumano',        description: 'Nivel 10 alcanzado',                             icon: '🦸', xpRequired: 2000, category: 'special',     unlockedAt: undefined   },
+];
 
 interface AppStoreValue {
   // Entries
@@ -211,6 +292,25 @@ interface AppStoreValue {
   // Alert thresholds
   thresholds: AlertThresholds;
   updateThresholds: (t: Partial<AlertThresholds>) => void;
+
+  // Tasks
+  tasks: Task[];
+  taskCompletions: TaskCompletion[];
+  addTask:        (data: Omit<Task, 'id'|'createdAt'>) => void;
+  deleteTask:     (id: string) => void;
+  toggleTask:     (id: string) => void;
+  completeTask:   (taskId: string, note?: string) => void;
+  getTasksForFrequency: (freq: TaskFrequency) => Task[];
+  isTaskCompletedToday: (taskId: string) => boolean;
+  getStreakForTask:     (taskId: string) => number;
+  getCompletionDaysThisMonth: (taskId: string, year: number, month: number) => Set<number>;
+
+  // Streak & XP
+  streakData: StreakData;
+
+  // Rewards
+  rewards: Reward[];
+  unlockedRewards: Reward[];
 }
 
 // ─── CONTEXT ─────────────────────────────────────────────────────────────────
@@ -225,6 +325,8 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     highEnabled: true, lowEnabled: true,
     mealReminders: true, medReminders: true,
   });
+  const [tasks,       setTasks]       = useState<Task[]>(INITIAL_TASKS);
+  const [completions, setCompletions] = useState<TaskCompletion[]>(INITIAL_COMPLETIONS);
 
   const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
@@ -396,6 +498,121 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     setThresholds(prev => ({ ...prev, ...t }));
   }, []);
 
+  // ── TASKS ─────────────────────────────────────────────────────────────────
+  const addTask = useCallback((data: Omit<Task, 'id'|'createdAt'>) => {
+    setTasks(prev => [{ ...data, id: uid(), createdAt: new Date() }, ...prev]);
+  }, []);
+
+  const deleteTask = useCallback((id: string) => {
+    setTasks(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  const toggleTask = useCallback((id: string) => {
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, active: !t.active } : t));
+  }, []);
+
+  const completeTask = useCallback((taskId: string, note?: string) => {
+    const c: TaskCompletion = { id: uid(), taskId, completedAt: new Date(), note };
+    setCompletions(prev => [c, ...prev]);
+    // XP + notify
+    const task = tasks.find(t => t.id === taskId);
+    if (task) {
+      scheduleLocalNotification('✅ Tarea completada', `"${task.title}" marcada como hecha. +10 XP`, 1);
+      addNotification({ title: '✅ Tarea completada', body: `"${task.title}" +10 XP`, type: 'success' });
+    }
+  }, [tasks, addNotification]);
+
+  const getTasksForFrequency = useCallback((freq: TaskFrequency) =>
+    tasks.filter(t => t.frequency === freq && t.active),
+  [tasks]);
+
+  const isTaskCompletedToday = useCallback((taskId: string) => {
+    const today = new Date();
+    return completions.some(c =>
+      c.taskId === taskId && isSameDay(c.completedAt, today)
+    );
+  }, [completions]);
+
+  const getStreakForTask = useCallback((taskId: string) => {
+    let streak = 0;
+    const today = new Date();
+    for (let i = 0; i < 365; i++) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const done = completions.some(c => c.taskId === taskId && isSameDay(c.completedAt, d));
+      if (done) streak++;
+      else if (i > 0) break;
+    }
+    return streak;
+  }, [completions]);
+
+  const getCompletionDaysThisMonth = useCallback((taskId: string, year: number, month: number): Set<number> => {
+    const days = new Set<number>();
+    completions
+      .filter(c => c.taskId === taskId &&
+        c.completedAt.getFullYear() === year &&
+        c.completedAt.getMonth() === month)
+      .forEach(c => days.add(c.completedAt.getDate()));
+    return days;
+  }, [completions]);
+
+  // ── STREAK DATA ───────────────────────────────────────────────────────────
+  const streakData = useMemo<StreakData>(() => {
+    const glucoseEs = entries.filter(e => e.type === 'glucose') as GlucoseEntry[];
+    const totalReadings = glucoseEs.length;
+    // Current streak: consecutive days with at least one glucose reading
+    let currentStreak = 0;
+    const today = new Date();
+    for (let i = 0; i < 365; i++) {
+      const d = new Date(today); d.setDate(today.getDate() - i);
+      if (glucoseEs.some(e => isSameDay(e.timestamp, d))) currentStreak++;
+      else if (i > 0) break;
+    }
+    // Longest streak
+    let longestStreak = 0, run = 0;
+    const sortedDays = Array.from(new Set(
+      glucoseEs.map(e => {
+        const d = e.timestamp;
+        return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      })
+    )).sort();
+    sortedDays.forEach((day, i) => {
+      if (i === 0) { run = 1; return; }
+      const [y1,m1,d1] = sortedDays[i-1].split('-').map(Number);
+      const [y2,m2,d2] = day.split('-').map(Number);
+      const prev = new Date(y1, m1, d1);
+      const curr = new Date(y2, m2, d2);
+      const diff = (curr.getTime() - prev.getTime()) / 86400000;
+      if (diff === 1) run++;
+      else run = 1;
+      if (run > longestStreak) longestStreak = run;
+    });
+    if (run > longestStreak) longestStreak = run;
+    const totalXP = totalReadings * 10 + completions.length * 5 + currentStreak * 15;
+    const level = Math.min(10, Math.floor(totalXP / 200) + 1);
+    return { currentStreak, longestStreak, totalReadings, totalXP, level };
+  }, [entries, completions]);
+
+  // ── REWARDS — auto-unlock based on streakData ─────────────────────────────
+  const rewards = useMemo(() => {
+    return INITIAL_REWARDS.map(r => {
+      if (r.unlockedAt) return r; // already unlocked in seed data
+      let shouldUnlock = false;
+      if (r.id === 'r4'  && streakData.currentStreak >= 7)   shouldUnlock = true;
+      if (r.id === 'r5'  && (entries.filter(e=>e.type==='meal').length >= 10))  shouldUnlock = true;
+      if (r.id === 'r6'  && streakData.currentStreak >= 30)  shouldUnlock = true;
+      if (r.id === 'r7'  && streakData.currentStreak >= 7 &&
+          (entries.filter(e=>e.type==='glucose') as GlucoseEntry[])
+            .slice(0,7).every(e=>e.value>=70&&e.value<=140)) shouldUnlock = true;
+      if (r.id === 'r8'  && completions.filter(c=>c.taskId==='t3').length >= 14) shouldUnlock = true;
+      if (r.id === 'r9'  && streakData.totalReadings >= 100) shouldUnlock = true;
+      if (r.id === 'r10' && streakData.level >= 10)          shouldUnlock = true;
+      return shouldUnlock ? { ...r, unlockedAt: new Date() } : r;
+    });
+  }, [streakData, entries, completions]);
+
+  const unlockedRewards = useMemo(() => rewards.filter(r => !!r.unlockedAt), [rewards]);
+
   const value = useMemo<AppStoreValue>(() => ({
     entries, glucoseEntries, exerciseEntries, mealEntries, medicationEntries, latestGlucose,
     addGlucoseEntry, addExerciseEntry, addMealEntry, addMedicationEntry,
@@ -405,6 +622,9 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     getWeeklyGlucoseData, getMonthlyGlucoseData,
     notifications, unreadCount, markNotificationRead, markAllRead, addNotification,
     thresholds, updateThresholds,
+    tasks, taskCompletions: completions, addTask, deleteTask, toggleTask, completeTask,
+    getTasksForFrequency, isTaskCompletedToday, getStreakForTask, getCompletionDaysThisMonth,
+    streakData, rewards, unlockedRewards,
   }), [
     entries, glucoseEntries, exerciseEntries, mealEntries, medicationEntries, latestGlucose,
     addGlucoseEntry, addExerciseEntry, addMealEntry, addMedicationEntry,
@@ -414,6 +634,9 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     getWeeklyGlucoseData, getMonthlyGlucoseData,
     notifications, unreadCount, markNotificationRead, markAllRead, addNotification,
     thresholds, updateThresholds,
+    tasks, completions, addTask, deleteTask, toggleTask, completeTask,
+    getTasksForFrequency, isTaskCompletedToday, getStreakForTask, getCompletionDaysThisMonth,
+    streakData, rewards, unlockedRewards,
   ]);
 
   return <AppStoreContext.Provider value={value}>{children}</AppStoreContext.Provider>;

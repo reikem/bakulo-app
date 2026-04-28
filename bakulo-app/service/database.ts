@@ -1,24 +1,18 @@
 /**
- * database.ts
- * Capa de datos unificada:
- *  - SQLite local (expo-sqlite) para persistencia offline
- *  - Adaptador PostgreSQL (REST API) para sincronización remota
- *  - Adaptador MongoDB/NoSQL (REST API) para documentos/repositorio
- *
- * Instalación:
- *   npx expo install expo-sqlite
+ * database.ts — v2
+ * Agrega:
+ *   • Tabla users con autenticación
+ *   • Usuario de prueba: jaime / 1234567
+ *   • db_validateUser, db_getCurrentUser, db_setCurrentUser
  */
 
 import * as SQLite from 'expo-sqlite';
 import { Platform } from 'react-native';
 
-// ─── CONFIG ──────────────────────────────────────────────────────────────────
-// Cambia estas URLs por las de tu backend real
 const PG_API_URL    = 'https://api.tu-backend.com/pg';
 const MONGO_API_URL = 'https://api.tu-backend.com/mongo';
 const API_KEY       = 'YOUR_API_KEY';
 
-// ─── SQLITE (LOCAL) ───────────────────────────────────────────────────────────
 let db: SQLite.SQLiteDatabase | null = null;
 
 function getDb(): SQLite.SQLiteDatabase {
@@ -26,10 +20,21 @@ function getDb(): SQLite.SQLiteDatabase {
   return db;
 }
 
+// ─── INIT ─────────────────────────────────────────────────────────────────────
 export const initDatabase = (): void => {
   const database = getDb();
   database.execSync(`
     PRAGMA journal_mode = WAL;
+
+    CREATE TABLE IF NOT EXISTS users (
+      id           TEXT PRIMARY KEY,
+      username     TEXT UNIQUE NOT NULL,
+      password     TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      email        TEXT,
+      avatar_url   TEXT,
+      created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
 
     CREATE TABLE IF NOT EXISTS glucose_entries (
       id          TEXT PRIMARY KEY,
@@ -44,40 +49,40 @@ export const initDatabase = (): void => {
     );
 
     CREATE TABLE IF NOT EXISTS exercise_entries (
-      id              TEXT PRIMARY KEY,
-      activity        TEXT NOT NULL,
+      id               TEXT PRIMARY KEY,
+      activity         TEXT NOT NULL,
       duration_minutes INTEGER NOT NULL,
-      note            TEXT,
-      completed       INTEGER DEFAULT 1,
-      timestamp       DATETIME NOT NULL,
-      synced          INTEGER DEFAULT 0,
-      created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+      note             TEXT,
+      completed        INTEGER DEFAULT 1,
+      timestamp        DATETIME NOT NULL,
+      synced           INTEGER DEFAULT 0,
+      created_at       DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS meal_entries (
-      id        TEXT PRIMARY KEY,
-      name      TEXT NOT NULL,
-      category  TEXT NOT NULL,
-      calories  INTEGER DEFAULT 0,
-      carbs     INTEGER DEFAULT 0,
-      protein   INTEGER DEFAULT 0,
-      fat       INTEGER DEFAULT 0,
-      image_uri TEXT,
-      completed INTEGER DEFAULT 1,
-      timestamp DATETIME NOT NULL,
-      synced    INTEGER DEFAULT 0,
+      id         TEXT PRIMARY KEY,
+      name       TEXT NOT NULL,
+      category   TEXT NOT NULL,
+      calories   INTEGER DEFAULT 0,
+      carbs      INTEGER DEFAULT 0,
+      protein    INTEGER DEFAULT 0,
+      fat        INTEGER DEFAULT 0,
+      image_uri  TEXT,
+      completed  INTEGER DEFAULT 1,
+      timestamp  DATETIME NOT NULL,
+      synced     INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS medication_entries (
-      id        TEXT PRIMARY KEY,
-      med_name  TEXT NOT NULL,
-      med_type  TEXT NOT NULL,
-      dosage    TEXT NOT NULL,
-      zone      TEXT,
-      completed INTEGER DEFAULT 1,
-      timestamp DATETIME NOT NULL,
-      synced    INTEGER DEFAULT 0,
+      id         TEXT PRIMARY KEY,
+      med_name   TEXT NOT NULL,
+      med_type   TEXT NOT NULL,
+      dosage     TEXT NOT NULL,
+      zone       TEXT,
+      completed  INTEGER DEFAULT 1,
+      timestamp  DATETIME NOT NULL,
+      synced     INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -115,9 +120,74 @@ export const initDatabase = (): void => {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  // ── Insertar usuario de prueba jaime si no existe ──────────────────────────
+  const existing = database.getFirstSync<{ id: string }>(
+    'SELECT id FROM users WHERE username = ?', ['jaime']
+  );
+  if (!existing) {
+    database.runSync(
+      `INSERT INTO users (id, username, password, display_name, email)
+       VALUES (?, ?, ?, ?, ?)`,
+      ['user-jaime-001', 'jaime', '1234567', 'Jaime', 'jaime@serenity.app']
+    );
+  }
 };
 
-// ─── GLUCOSE ──────────────────────────────────────────────────────────────────
+// ─── AUTH ─────────────────────────────────────────────────────────────────────
+
+export interface AppUser {
+  id: string;
+  username: string;
+  displayName: string;
+  email?: string;
+  avatarUrl?: string;
+}
+
+/**
+ * Valida credenciales. Retorna el usuario si son correctas, null si no.
+ */
+export const db_validateUser = (username: string, password: string): AppUser | null => {
+  const row = getDb().getFirstSync<{
+    id: string; username: string; display_name: string; email: string; avatar_url: string;
+  }>(
+    'SELECT id, username, display_name, email, avatar_url FROM users WHERE username = ? AND password = ?',
+    [username.trim().toLowerCase(), password]
+  );
+  if (!row) return null;
+  return {
+    id: row.id,
+    username: row.username,
+    displayName: row.display_name,
+    email: row.email,
+    avatarUrl: row.avatar_url,
+  };
+};
+
+/** Guarda el usuario logueado en preferences */
+export const db_setCurrentUser = (user: AppUser): void => {
+  getDb().runSync(
+    'INSERT OR REPLACE INTO user_preferences (key, value) VALUES (?, ?)',
+    ['current_user', JSON.stringify(user)]
+  );
+};
+
+/** Lee el usuario logueado */
+export const db_getCurrentUser = (): AppUser | null => {
+  const row = getDb().getFirstSync<{ value: string }>(
+    'SELECT value FROM user_preferences WHERE key = ?', ['current_user']
+  );
+  if (!row) return null;
+  try { return JSON.parse(row.value); } catch { return null; }
+};
+
+/** Cierra sesión */
+export const db_logout = (): void => {
+  getDb().runSync('DELETE FROM user_preferences WHERE key = ?', ['current_user']);
+};
+
+// ─── GLUCOSE ─────────────────────────────────────────────────────────────────
+
 export const db_saveGlucose = (entry: {
   id: string; value: number; source: string;
   deviceName?: string; note?: string; timestamp: Date;
@@ -133,13 +203,11 @@ export const db_saveGlucose = (entry: {
   _enqueue('glucose_entries', entry.id, 'INSERT', entry);
 };
 
-export const db_getGlucoseEntries = (): any[] => {
-  return getDb().getAllSync(
-    'SELECT * FROM glucose_entries ORDER BY timestamp DESC'
-  );
-};
+export const db_getGlucoseEntries = (): any[] =>
+  getDb().getAllSync('SELECT * FROM glucose_entries ORDER BY timestamp DESC');
 
-// ─── EXERCISE ─────────────────────────────────────────────────────────────────
+// ─── EXERCISE ────────────────────────────────────────────────────────────────
+
 export const db_saveExercise = (entry: {
   id: string; activity: string; durationMinutes: number;
   note?: string; timestamp: Date;
@@ -154,7 +222,8 @@ export const db_saveExercise = (entry: {
   _enqueue('exercise_entries', entry.id, 'INSERT', entry);
 };
 
-// ─── MEALS ────────────────────────────────────────────────────────────────────
+// ─── MEALS ───────────────────────────────────────────────────────────────────
+
 export const db_saveMeal = (entry: {
   id: string; name: string; category: string;
   calories: number; carbs: number; protein: number; fat: number;
@@ -168,10 +237,10 @@ export const db_saveMeal = (entry: {
      entry.calories, entry.carbs, entry.protein, entry.fat,
      entry.imageUri ?? null, entry.timestamp.toISOString()]
   );
-  _enqueue('meal_entries', entry.id, 'INSERT', entry);
 };
 
-// ─── MEDICATION ───────────────────────────────────────────────────────────────
+// ─── MEDICATION ──────────────────────────────────────────────────────────────
+
 export const db_saveMedication = (entry: {
   id: string; medName: string; medType: string;
   dosage: string; zone?: string; timestamp: Date;
@@ -183,10 +252,10 @@ export const db_saveMedication = (entry: {
     [entry.id, entry.medName, entry.medType,
      entry.dosage, entry.zone ?? null, entry.timestamp.toISOString()]
   );
-  _enqueue('medication_entries', entry.id, 'INSERT', entry);
 };
 
 // ─── REPOSITORY DOCUMENTS ────────────────────────────────────────────────────
+
 export const db_saveDocument = (doc: {
   id: string; name: string; type: string; uri: string;
   base64?: string; sizeBytes?: number; tags?: string; description?: string;
@@ -204,21 +273,20 @@ export const db_saveDocument = (doc: {
   _enqueue('repository_documents', doc.id, 'INSERT', { ...doc, base64: null });
 };
 
-export const db_getDocuments = (): any[] => {
-  return getDb().getAllSync(
+export const db_getDocuments = (): any[] =>
+  getDb().getAllSync(
     'SELECT id, name, type, uri, size_bytes, tags, description, uploaded_at FROM repository_documents ORDER BY uploaded_at DESC'
   );
-};
 
 export const db_deleteDocument = (id: string) => {
   getDb().runSync('DELETE FROM repository_documents WHERE id = ?', [id]);
 };
 
 // ─── PREFERENCES ─────────────────────────────────────────────────────────────
+
 export const db_setPreference = (key: string, value: string) => {
   getDb().runSync(
-    'INSERT OR REPLACE INTO user_preferences (key, value) VALUES (?, ?)',
-    [key, value]
+    'INSERT OR REPLACE INTO user_preferences (key, value) VALUES (?, ?)', [key, value]
   );
 };
 
@@ -230,13 +298,13 @@ export const db_getPreference = (key: string): string | null => {
 };
 
 // ─── SECURITY ────────────────────────────────────────────────────────────────
+
 export const db_logSecurityEvent = (type: 'password_change' | 'login' | 'biometric' | '2fa_setup') => {
-  getDb().runSync(
-    'INSERT INTO security_logs (event_type) VALUES (?)', [type]
-  );
+  getDb().runSync('INSERT INTO security_logs (event_type) VALUES (?)', [type]);
 };
 
-// ─── SYNC QUEUE (para sincronización posterior) ───────────────────────────────
+// ─── SYNC QUEUE ──────────────────────────────────────────────────────────────
+
 const _enqueue = (table: string, id: string, op: string, payload: any) => {
   try {
     getDb().runSync(
@@ -244,104 +312,60 @@ const _enqueue = (table: string, id: string, op: string, payload: any) => {
        VALUES (?, ?, ?, ?)`,
       [table, id, op, JSON.stringify(payload)]
     );
-  } catch { /* no interrumpir si falla el enqueue */ }
+  } catch { /* no interrumpir */ }
 };
 
-export const db_getPendingSyncItems = (): any[] => {
-  return getDb().getAllSync(
-    'SELECT * FROM sync_queue ORDER BY created_at ASC LIMIT 100'
-  );
-};
+export const db_getPendingSyncItems = (): any[] =>
+  getDb().getAllSync('SELECT * FROM sync_queue ORDER BY created_at ASC LIMIT 100');
 
 export const db_clearSyncedItems = (ids: number[]) => {
   if (ids.length === 0) return;
-  const placeholders = ids.map(() => '?').join(',');
-  getDb().runSync(`DELETE FROM sync_queue WHERE id IN (${placeholders})`, ids);
+  const ph = ids.map(() => '?').join(',');
+  getDb().runSync(`DELETE FROM sync_queue WHERE id IN (${ph})`, ids);
 };
 
-// ─── POSTGRESQL ADAPTER ───────────────────────────────────────────────────────
+// ─── ADAPTERS ────────────────────────────────────────────────────────────────
+
 export const PostgresAdapter = {
-  /**
-   * Envía datos pendientes al backend PostgreSQL vía REST API.
-   * Tu backend debe exponer POST /pg/batch con array de operaciones.
-   */
   syncPendingItems: async (): Promise<{ success: boolean; synced: number }> => {
     const items = db_getPendingSyncItems();
     if (items.length === 0) return { success: true, synced: 0 };
-
     try {
-      const response = await fetch(`${PG_API_URL}/batch`, {
+      const res = await fetch(`${PG_API_URL}/batch`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': API_KEY,
-        },
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
         body: JSON.stringify({ operations: items }),
       });
-
-      if (response.ok) {
-        db_clearSyncedItems(items.map((i: any) => i.id));
-        return { success: true, synced: items.length };
-      }
+      if (res.ok) { db_clearSyncedItems(items.map((i: any) => i.id)); return { success: true, synced: items.length }; }
       return { success: false, synced: 0 };
-    } catch {
-      return { success: false, synced: 0 };
-    }
+    } catch { return { success: false, synced: 0 }; }
   },
-
-  /**
-   * Obtiene reportes históricos del servidor PostgreSQL.
-   */
   fetchGlucoseReport: async (from: string, to: string): Promise<any[]> => {
     try {
-      const res = await fetch(
-        `${PG_API_URL}/glucose?from=${from}&to=${to}`,
-        { headers: { 'X-API-Key': API_KEY } }
-      );
+      const res = await fetch(`${PG_API_URL}/glucose?from=${from}&to=${to}`, { headers: { 'X-API-Key': API_KEY } });
       if (res.ok) return await res.json();
-    } catch { /* offline */ }
-    // Fallback: devolver datos locales
+    } catch {}
     return db_getGlucoseEntries();
   },
 };
 
-// ─── MONGODB/NOSQL ADAPTER ────────────────────────────────────────────────────
 export const MongoAdapter = {
-  /**
-   * Guarda un documento en MongoDB (ideal para PDFs, fotos grandes).
-   * Tu backend debe exponer POST /mongo/documents.
-   */
-  uploadDocument: async (doc: {
-    id: string; name: string; type: string;
-    base64: string; metadata: Record<string, any>;
-  }): Promise<{ success: boolean; remoteId?: string }> => {
+  uploadDocument: async (doc: { id: string; name: string; type: string; base64: string; metadata: Record<string, any> }): Promise<{ success: boolean; remoteId?: string }> => {
     try {
       const res = await fetch(`${MONGO_API_URL}/documents`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': API_KEY,
-        },
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
         body: JSON.stringify(doc),
       });
-      if (res.ok) {
-        const data = await res.json();
-        return { success: true, remoteId: data.id };
-      }
-    } catch { /* offline */ }
+      if (res.ok) { const data = await res.json(); return { success: true, remoteId: data.id }; }
+    } catch {}
     return { success: false };
   },
-
-  /**
-   * Lista documentos desde MongoDB.
-   */
   listDocuments: async (): Promise<any[]> => {
     try {
-      const res = await fetch(`${MONGO_API_URL}/documents`, {
-        headers: { 'X-API-Key': API_KEY },
-      });
+      const res = await fetch(`${MONGO_API_URL}/documents`, { headers: { 'X-API-Key': API_KEY } });
       if (res.ok) return await res.json();
-    } catch { /* offline */ }
-    return db_getDocuments(); // fallback local
+    } catch {}
+    return db_getDocuments();
   },
 };

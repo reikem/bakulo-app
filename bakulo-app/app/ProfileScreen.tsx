@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import {
   ArrowLeft, Settings, Heart, Activity, Smartphone,
   Share2, Edit3, CheckCircle, XCircle, RefreshCw, ChevronRight,
+  Flame, Trophy, Zap, Star,
 } from 'lucide-react-native';
 import { Share } from 'react-native';
 import { healthService, HealthConnection, HealthProvider } from '@/service/healthService';
@@ -92,7 +93,7 @@ function HealthStatsCard({ avg, trend, inRange }: { avg: number; trend: string; 
 // ─── MAIN SCREEN ─────────────────────────────────────────────────────────────
 export default function ProfileScreen() {
   const router = useRouter();
-  const { glucoseEntries } = useAppStore();
+  const { glucoseEntries, streakData, unlockedRewards, rewards } = useAppStore();
 
   const [connections,   setConnections]   = useState<HealthConnection[]>([]);
   const [loadingId,     setLoadingId]     = useState<HealthProvider | null>(null);
@@ -198,6 +199,69 @@ export default function ProfileScreen() {
           ))}
         </View>
 
+        {/* Rachas y XP */}
+        <Text style={s.sectionTitle}>Actividad y Rachas</Text>
+        <View style={s.streakRow}>
+          <View style={s.streakBox}>
+            <Flame color="#f59e0b" size={22} fill="#f59e0b" />
+            <Text style={s.streakVal}>{streakData.currentStreak}</Text>
+            <Text style={s.streakLbl}>Racha actual</Text>
+          </View>
+          <View style={s.streakBox}>
+            <Star color="#fbbf24" size={22} fill="#fbbf24" />
+            <Text style={s.streakVal}>{streakData.longestStreak}</Text>
+            <Text style={s.streakLbl}>Récord</Text>
+          </View>
+          <View style={s.streakBox}>
+            <Zap color="#86d0ef" size={22} />
+            <Text style={s.streakVal}>{streakData.totalXP}</Text>
+            <Text style={s.streakLbl}>XP total</Text>
+          </View>
+          <View style={s.streakBox}>
+            <Trophy color="#c4b5fd" size={22} />
+            <Text style={s.streakVal}>Nv.{streakData.level}</Text>
+            <Text style={s.streakLbl}>Nivel</Text>
+          </View>
+        </View>
+
+        {/* Logros desbloqueados */}
+        <View style={s.awardsHeader}>
+          <Text style={s.sectionTitle}>Logros</Text>
+          <Text style={s.awardsCount}>{unlockedRewards.length}/{rewards.length}</Text>
+        </View>
+        <Text style={[s.sectionSub, { marginBottom: 12 }]}>Premios obtenidos hasta ahora</Text>
+        {unlockedRewards.length === 0 ? (
+          <View style={s.awardsEmpty}>
+            <Trophy color="#2a3436" size={28} />
+            <Text style={s.awardsEmptyTxt}>Completa tareas para desbloquear logros</Text>
+          </View>
+        ) : (
+          <View style={s.awardsGrid}>
+            {unlockedRewards.map(r => (
+              <View key={r.id} style={s.awardCard}>
+                <Text style={s.awardIcon}>{r.icon}</Text>
+                <Text style={s.awardTitle} numberOfLines={1}>{r.title}</Text>
+                <Text style={s.awardDesc} numberOfLines={2}>{r.description}</Text>
+                {r.unlockedAt && (
+                  <Text style={s.awardDate}>
+                    {new Date(r.unlockedAt).toLocaleDateString('es', { day:'numeric', month:'short' })}
+                  </Text>
+                )}
+              </View>
+            ))}
+            {/* Locked preview */}
+            {rewards.filter(r => !r.unlockedAt).slice(0,2).map(r => (
+              <View key={r.id} style={[s.awardCard, s.awardCardLocked]}>
+                <Text style={[s.awardIcon, { opacity: 0.2 }]}>{r.icon}</Text>
+                <Text style={[s.awardTitle, { color: '#2a3436' }]} numberOfLines={1}>{r.title}</Text>
+                <View style={s.lockedBadge}>
+                  <Text style={s.lockedTxt}>🔒 {r.xpRequired} XP</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
         {/* Sign out */}
         <TouchableOpacity style={s.signOutBtn} onPress={() => router.replace('/login')}>
           <Text style={s.signOutText}>Cerrar Sesión</Text>
@@ -272,6 +336,25 @@ const s = StyleSheet.create({
   ecoDivider:     { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.06)', marginHorizontal: 18 },
   signOutBtn:     { borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', borderRadius: 20, padding: 16, alignItems: 'center' },
   signOutText:    { color: '#6f787d', fontWeight: '700' },
+
+  streakRow:      { flexDirection: 'row', gap: 10, marginBottom: 24 },
+  streakBox:      { flex: 1, backgroundColor: '#1d2426', borderRadius: 18, padding: 12, alignItems: 'center', gap: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  streakVal:      { color: '#ecf2f3', fontSize: 18, fontWeight: '800' },
+  streakLbl:      { color: '#6f787d', fontSize: 9, fontWeight: '700', textAlign: 'center' },
+
+  awardsHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 },
+  awardsCount:    { color: '#86d0ef', fontSize: 13, fontWeight: '800' },
+  awardsEmpty:    { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#1d2426', borderRadius: 16, padding: 16, marginBottom: 24 },
+  awardsEmptyTxt: { color: '#6f787d', fontSize: 12, flex: 1 },
+  awardsGrid:     { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 },
+  awardCard:      { width: '47%', backgroundColor: '#1a2820', borderRadius: 18, padding: 14, gap: 3, borderWidth: 1, borderColor: 'rgba(34,197,94,0.15)' },
+  awardCardLocked:{ backgroundColor: '#1a1a1a', borderColor: 'rgba(255,255,255,0.04)' },
+  awardIcon:      { fontSize: 28, marginBottom: 2 },
+  awardTitle:     { color: '#c4ebe0', fontSize: 12, fontWeight: '800' },
+  awardDesc:      { color: '#6f787d', fontSize: 10, lineHeight: 14 },
+  awardDate:      { color: '#22c55e', fontSize: 9, fontWeight: '700', marginTop: 2 },
+  lockedBadge:    { marginTop: 4 },
+  lockedTxt:      { color: '#3f484c', fontSize: 10, fontWeight: '700' },
   modalOverlay:   { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', padding: 24 },
   modalContent:   { backgroundColor: '#1d2426', padding: 30, borderRadius: 32 },
   modalTitle:     { color: '#c4ebe0', fontSize: 22, fontWeight: '800', marginBottom: 20 },

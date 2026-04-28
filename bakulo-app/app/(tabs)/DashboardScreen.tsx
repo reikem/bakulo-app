@@ -1,11 +1,12 @@
 /**
- * DashboardScreen.tsx — actualizado
- * 
- * Ahora lee el valor de glucosa más reciente del GlucoseStore global.
- * El gráfico BloodSugarChart también usa el store, así que se actualiza solo.
+ * DashboardScreen.tsx — v3
+ * • Muestra nombre del usuario logueado (desde SQLite)
+ * • Botón "Registrar Ejercicio" → log-exercise
+ * • Botón "Repositorio" → RepositoryScreen
+ * • Botón "Ver Historial" (con documentos incluidos)
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Dimensions, SafeAreaView,
@@ -13,71 +14,86 @@ import {
 import {
   PlusCircle, ShieldCheck, Target, Utensils,
   Droplets, ChevronRight, History, FileText,
-  Settings, Syringe, Lightbulb,
+  Settings, Syringe, Lightbulb, Dumbbell, FolderOpen,
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { BloodSugarChart } from '@/components/ui/BloodSugarChart';
 import { CriticalAlert } from '@/components/ui/CriticalAlert';
 import { useGlucose } from '@/store/GlucoseStore';
 import { getGlucoseRange } from '@/store/AppStore';
-
+import { db_getCurrentUser, AppUser } from '@/service/database';
 
 const { width } = Dimensions.get('window');
 
 export default function DashboardScreen() {
   const [showAlert, setShowAlert] = useState(false);
+  const [user,      setUser]      = useState<AppUser | null>(null);
   const router = useRouter();
   const { latestEntry, entries } = useGlucose();
 
-  // Valor a mostrar: último registrado o placeholder
+  useEffect(() => {
+    setUser(db_getCurrentUser());
+  }, []);
+
   const currentValue = latestEntry?.value ?? 108;
   const range = getGlucoseRange(currentValue);
 
-  // Time in range: % de entradas del día en rango 70-140
   const todayEntries = entries.filter(e => {
     const now = new Date();
-    const d = e.timestamp;
+    const d   = e.timestamp;
     return d.getFullYear() === now.getFullYear() &&
-           d.getMonth() === now.getMonth() &&
-           d.getDate() === now.getDate();
+           d.getMonth()    === now.getMonth()    &&
+           d.getDate()     === now.getDate();
   });
   const inRange = todayEntries.filter(e => e.value >= 70 && e.value <= 140).length;
   const timeInRangePct = todayEntries.length > 0
     ? Math.round((inRange / todayEntries.length) * 100)
-    : 92; // default muestra
+    : 92;
 
-  // Formato de tiempo del último registro
   const lastTime = latestEntry
     ? latestEntry.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : null;
 
+  const greeting = () => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Buenos días';
+    if (h < 19) return 'Buenas tardes';
+    return 'Buenas noches';
+  };
+
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+
+        {/* ── Greeting ── */}
+        {user && (
+          <View style={styles.greetingRow}>
+            <View>
+              <Text style={styles.greetingText}>{greeting()},</Text>
+              <Text style={styles.greetingName}>{user.displayName} 👋</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.notifBtn}
+              onPress={() => router.push('/NotificationsScreen')}
+            >
+              <Text style={styles.notifIcon}>🔔</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* ── Hero Section ── */}
         <View style={styles.heroLayout}>
           <View style={styles.mainGlucoseCard}>
             <View>
               <Text style={styles.label}>GLUCOSA ACTUAL</Text>
               <View style={styles.glucoseRow}>
-                <Text style={[styles.glucoseValue, { color: range.color }]}>
-                  {currentValue}
-                </Text>
+                <Text style={[styles.glucoseValue, { color: range.color }]}>{currentValue}</Text>
                 <Text style={styles.glucoseUnit}>mg/dL</Text>
               </View>
-
-              {/* Badge de rango */}
               <View style={[styles.statusBadge, { backgroundColor: range.darkBg }]}>
                 <Droplets color={range.color} size={14} fill={range.color} />
-                <Text style={[styles.statusText, { color: range.color }]}>
-                  {range.label}
-                </Text>
+                <Text style={[styles.statusText, { color: range.color }]}>{range.label}</Text>
               </View>
-
-              {/* Hora del último registro */}
               {lastTime && (
                 <Text style={styles.lastTimeText}>
                   Último registro · {lastTime}
@@ -95,7 +111,6 @@ export default function DashboardScreen() {
                 <PlusCircle color="#fff" size={18} />
                 <Text style={styles.logButtonText}>Registrar Glucosa</Text>
               </TouchableOpacity>
-
               <TouchableOpacity
                 style={[styles.logButton, styles.medicationBtn]}
                 activeOpacity={0.8}
@@ -108,7 +123,6 @@ export default function DashboardScreen() {
           </View>
 
           <View style={styles.statsColumn}>
-            {/* Time in Range */}
             <View style={[styles.miniCard, { backgroundColor: '#c4ebe0' }]}>
               <View style={styles.miniCardHeader}>
                 <Text style={styles.miniCardTitle}>Tiempo en Rango</Text>
@@ -117,12 +131,10 @@ export default function DashboardScreen() {
               <Text style={styles.miniCardValue}>{timeInRangePct}%</Text>
               <Text style={styles.miniCardSub}>Hoy</Text>
             </View>
-
-            {/* Daily Goal */}
             <TouchableOpacity
               style={styles.miniCardDark}
               activeOpacity={0.9}
-              onPress={() => router.push('/DailyTasksScreen')}
+              onPress={() => router.push('/(tabs)/DailyTasksScreen')}
             >
               <View style={styles.miniCardHeader}>
                 <Text style={[styles.miniCardTitle, { color: '#86d0ef' }]}>Meta Diaria</Text>
@@ -136,16 +148,12 @@ export default function DashboardScreen() {
           </View>
         </View>
 
-        <CriticalAlert
-          visible={showAlert}
-          onDismiss={() => setShowAlert(false)}
-          glucoseValue={55}
-        />
+        <CriticalAlert visible={showAlert} onDismiss={() => setShowAlert(false)} glucoseValue={55} />
 
-        {/* ── Insights ── */}
+        {/* ── Insight card ── */}
         <TouchableOpacity
           style={styles.insightHighlightCard}
-          onPress={() => router.push('/InsightsScreen')}
+          onPress={() => router.push('/(tabs)/InsightsScreen')}
           activeOpacity={0.9}
         >
           <View style={styles.insightContent}>
@@ -163,10 +171,10 @@ export default function DashboardScreen() {
           </View>
         </TouchableOpacity>
 
-        {/* ── Gráfico (se actualiza automáticamente con el store) ── */}
+        {/* ── Gráfico ── */}
         <BloodSugarChart />
 
-        {/* ── Quick Access ── */}
+        {/* ── Acciones rápidas ── */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Acceso Rápido</Text>
         </View>
@@ -190,9 +198,39 @@ export default function DashboardScreen() {
           <QuickAction
             icon={<Settings color="#86d0ef" size={24} />}
             label="Ajustes"
-            onPress={() => router.push('/settings')}
+            onPress={() => router.push('/(tabs)/settings')}
           />
         </View>
+
+        {/* ── Nuevos botones destacados ── */}
+        <View style={styles.featuredRow}>
+          {/* Ejercicio */}
+          <TouchableOpacity
+            style={[styles.featuredCard, { backgroundColor: 'rgba(164,244,183,0.08)', borderColor: 'rgba(164,244,183,0.2)' }]}
+            activeOpacity={0.85}
+            onPress={() => router.push('/log-exercise')}
+          >
+            <View style={[styles.featuredIcon, { backgroundColor: 'rgba(164,244,183,0.12)' }]}>
+              <Dumbbell color="#a4f4b7" size={28} />
+            </View>
+            <Text style={[styles.featuredLabel, { color: '#a4f4b7' }]}>Registrar{'\n'}Ejercicio</Text>
+            <ChevronRight color="#a4f4b7" size={18} style={styles.featuredArrow} />
+          </TouchableOpacity>
+
+          {/* Repositorio */}
+          <TouchableOpacity
+            style={[styles.featuredCard, { backgroundColor: 'rgba(134,208,239,0.08)', borderColor: 'rgba(134,208,239,0.2)' }]}
+            activeOpacity={0.85}
+            onPress={() => router.push('/RepositoryScreen')}
+          >
+            <View style={[styles.featuredIcon, { backgroundColor: 'rgba(134,208,239,0.12)' }]}>
+              <FolderOpen color="#86d0ef" size={28} />
+            </View>
+            <Text style={[styles.featuredLabel, { color: '#86d0ef' }]}>Mi{'\n'}Repositorio</Text>
+            <ChevronRight color="#86d0ef" size={18} style={styles.featuredArrow} />
+          </TouchableOpacity>
+        </View>
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -206,107 +244,58 @@ const QuickAction = ({ icon, label, onPress }: any) => (
 );
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#121212' },
-  scrollContent: { padding: 20, paddingBottom: 100 },
+  container:      { flex: 1, backgroundColor: '#121212' },
+  scrollContent:  { padding: 20, paddingBottom: 100 },
 
-  heroLayout: { flexDirection: 'row', gap: 12, marginBottom: 20 },
-  mainGlucoseCard: {
-    flex: 1.2,
-    backgroundColor: '#1a1a1a',
-    borderRadius: 32,
-    padding: 20,
-    minHeight: 260,
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-  },
-  statsColumn: { flex: 0.8, gap: 12 },
+  greetingRow:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  greetingText:   { color: '#6f787d', fontSize: 14, fontWeight: '500' },
+  greetingName:   { color: '#ecf2f3', fontSize: 22, fontWeight: '800', marginTop: 2 },
+  notifBtn:       { width: 42, height: 42, backgroundColor: '#1a1a1a', borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
+  notifIcon:      { fontSize: 20 },
 
-  label: { color: '#42655d', fontSize: 10, fontWeight: '800', letterSpacing: 1, marginBottom: 4 },
-  glucoseRow: { flexDirection: 'row', alignItems: 'baseline', gap: 4 },
-  glucoseValue: { fontSize: 44, fontWeight: '800' },
-  glucoseUnit: { color: '#6f787d', fontSize: 14, fontWeight: '600' },
+  heroLayout:     { flexDirection: 'row', gap: 12, marginBottom: 20 },
+  mainGlucoseCard:{ flex: 1.2, backgroundColor: '#1a1a1a', borderRadius: 32, padding: 20, minHeight: 260, justifyContent: 'space-between', borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  statsColumn:    { flex: 0.8, gap: 12 },
 
-  statusBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    marginTop: 6, alignSelf: 'flex-start',
-    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 100,
-  },
-  statusText: { fontSize: 12, fontWeight: '700' },
-  lastTimeText: { color: '#6f787d', fontSize: 9, marginTop: 4, letterSpacing: 0.3 },
+  label:          { color: '#42655d', fontSize: 10, fontWeight: '800', letterSpacing: 1, marginBottom: 4 },
+  glucoseRow:     { flexDirection: 'row', alignItems: 'baseline', gap: 4 },
+  glucoseValue:   { fontSize: 44, fontWeight: '800' },
+  glucoseUnit:    { color: '#6f787d', fontSize: 14, fontWeight: '600' },
+  statusBadge:    { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6, alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 100 },
+  statusText:     { fontSize: 12, fontWeight: '700' },
+  lastTimeText:   { color: '#6f787d', fontSize: 9, marginTop: 4, letterSpacing: 0.3 },
 
-  logButtonsContainer: { gap: 8, marginTop: 16 },
-  logButton: {
-    backgroundColor: '#004e63',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    borderRadius: 100,
-    gap: 8,
-  },
-  medicationBtn: {
-    backgroundColor: 'rgba(26,108,60,0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(155,234,174,0.2)',
-  },
-  logButtonText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  logButtonsContainer:{ gap: 8, marginTop: 16 },
+  logButton:      { backgroundColor: '#004e63', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 100, gap: 8 },
+  medicationBtn:  { backgroundColor: 'rgba(26,108,60,0.15)', borderWidth: 1, borderColor: 'rgba(155,234,174,0.2)' },
+  logButtonText:  { color: '#fff', fontSize: 13, fontWeight: '700' },
 
-  miniCard: { flex: 1, borderRadius: 24, padding: 16, justifyContent: 'space-between' },
-  miniCardDark: {
-    flex: 1,
-    backgroundColor: '#1a1a1a',
-    borderRadius: 24,
-    padding: 16,
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-  },
+  miniCard:       { flex: 1, borderRadius: 24, padding: 16, justifyContent: 'space-between' },
+  miniCardDark:   { flex: 1, backgroundColor: '#1a1a1a', borderRadius: 24, padding: 16, justifyContent: 'space-between', borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
   miniCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  miniCardTitle: { color: '#2a4d46', fontSize: 11, fontWeight: '700' },
-  miniCardValue: { color: '#00201b', fontSize: 24, fontWeight: '800' },
-  miniCardSub: { color: '#6f787d', fontSize: 10, fontWeight: '500' },
-  progressContainer: { height: 6, backgroundColor: '#333b3d', borderRadius: 10, marginTop: 12 },
-  progressFill: { height: '100%', backgroundColor: '#005229', borderRadius: 10 },
+  miniCardTitle:  { color: '#2a4d46', fontSize: 11, fontWeight: '700' },
+  miniCardValue:  { color: '#00201b', fontSize: 24, fontWeight: '800' },
+  miniCardSub:    { color: '#6f787d', fontSize: 10, fontWeight: '500' },
+  progressContainer:{ height: 6, backgroundColor: '#333b3d', borderRadius: 10, marginTop: 12 },
+  progressFill:   { height: '100%', backgroundColor: '#005229', borderRadius: 10 },
 
-  insightHighlightCard: {
-    backgroundColor: 'rgba(0,78,99,0.2)',
-    borderRadius: 24,
-    padding: 16,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(196,235,224,0.1)',
-  },
+  insightHighlightCard:{ backgroundColor: 'rgba(0,78,99,0.2)', borderRadius: 24, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: 'rgba(196,235,224,0.1)' },
   insightContent: { flexDirection: 'row', alignItems: 'center', gap: 16 },
-  insightIconWrapper: {
-    width: 48, height: 48,
-    backgroundColor: '#c4ebe0',
-    borderRadius: 16,
-    justifyContent: 'center', alignItems: 'center',
-  },
-  insightTag: { color: '#89d89d', fontSize: 9, fontWeight: '800', letterSpacing: 1, marginBottom: 2 },
-  insightTitle: { color: '#c4ebe0', fontSize: 15, fontWeight: '700' },
-  insightDesc: { color: '#6f787d', fontSize: 12, marginTop: 2 },
+  insightIconWrapper:{ width: 48, height: 48, backgroundColor: '#c4ebe0', borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
+  insightTag:     { color: '#89d89d', fontSize: 9, fontWeight: '800', letterSpacing: 1, marginBottom: 2 },
+  insightTitle:   { color: '#c4ebe0', fontSize: 15, fontWeight: '700' },
+  insightDesc:    { color: '#6f787d', fontSize: 12, marginTop: 2 },
 
-  sectionHeader: { marginTop: 8, marginBottom: 16 },
-  sectionTitle: { color: '#86d0ef', fontSize: 20, fontWeight: '800' },
-  quickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  quickItem: {
-    width: (width - 52) / 2,
-    aspectRatio: 1.1,
-    backgroundColor: '#1a1a1a',
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-  },
-  quickIconWrapper: {
-    width: 50, height: 50,
-    backgroundColor: 'rgba(134,208,239,0.05)',
-    borderRadius: 18,
-    justifyContent: 'center', alignItems: 'center',
-  },
-  quickLabel: { color: '#ecf2f3', fontSize: 13, fontWeight: '600' },
+  sectionHeader:  { marginTop: 8, marginBottom: 16 },
+  sectionTitle:   { color: '#86d0ef', fontSize: 20, fontWeight: '800' },
+  quickGrid:      { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  quickItem:      { width: (width - 52) / 2, aspectRatio: 1.1, backgroundColor: '#1a1a1a', borderRadius: 28, alignItems: 'center', justifyContent: 'center', gap: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  quickIconWrapper:{ width: 50, height: 50, backgroundColor: 'rgba(134,208,239,0.05)', borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
+  quickLabel:     { color: '#ecf2f3', fontSize: 13, fontWeight: '600' },
+
+  featuredRow:    { flexDirection: 'row', gap: 12, marginTop: 20 },
+  featuredCard:   { flex: 1, borderRadius: 24, borderWidth: 1, padding: 18, gap: 10 },
+  featuredIcon:   { width: 52, height: 52, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
+  featuredLabel:  { fontSize: 14, fontWeight: '800', lineHeight: 20 },
+  featuredArrow:  { alignSelf: 'flex-end', marginTop: 4 },
 });

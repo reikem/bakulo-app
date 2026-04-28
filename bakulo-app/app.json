@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.tuusuario.bakuloapp"
+      "bundleIdentifier": "com.tuusuario.bakuloapp", "adaptiveIcon": { "foregroundImage": "./assets/icon-fg.png", "backgroundColor": "#080e10" }
     },
     "android": {
       "package": "com.tuusuario.bakuloapp",
