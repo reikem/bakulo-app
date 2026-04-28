@@ -25,8 +25,8 @@ import {
 // ─── ENV VARS ─────────────────────────────────────────────────────────────────
 // Expo expone las variables con prefijo EXPO_PUBLIC_ al bundle
 const SUPPORT_EMAIL   = process.env.EXPO_PUBLIC_SUPPORT_EMAIL   ?? 'esjimmymeneses11@gmail.com';
-const GITHUB_ISSUES   = process.env.EXPO_PUBLIC_GITHUB_ISSUES_URL ?? 'https://github.com/tu-usuario/bakulo-app/issues/new';
-const GITHUB_REPO     = process.env.EXPO_PUBLIC_GITHUB_REPO_URL   ?? 'https://github.com/tu-usuario/bakulo-app';
+const GITHUB_ISSUES   = process.env.EXPO_PUBLIC_GITHUB_ISSUES_URL ?? 'https://github.com/reikem/bakulo-app/issues/new';
+const GITHUB_REPO     = process.env.EXPO_PUBLIC_GITHUB_REPO_URL   ?? 'https://github.com/reikem/bakulo-app';
 const APP_VERSION     = process.env.EXPO_PUBLIC_APP_VERSION        ?? '1.0.0';
 
 // ─── TUTORIAL STEPS ───────────────────────────────────────────────────────────
