@@ -1,9 +1,10 @@
 /**
- * routes.ts — v2
+ * routes.ts — v3
  * Rutas centralizadas de toda la aplicación Serenity.
- * Importa desde cualquier pantalla:
+ *
+ * Uso:
  *   import { ROUTES } from '@/constants/routes';
- *   router.push(ROUTES.HEALTH.REPOSITORY);
+ *   router.push(ROUTES.RECIPES.LIST);
  */
 
 export const ROUTES = {
@@ -12,19 +13,18 @@ export const ROUTES = {
   },
 
   TABS: {
-    INDEX:      '/(tabs)/DashboardScreen',
-    ADVICE:     '/(tabs)/advice',
-    EXPLORE:    '/(tabs)/explore',
-    HISTORY:    '/(tabs)/history',
-    SETTINGS:   '/(tabs)/settings',
-    SYNC:       '/(tabs)/sync',
+    INDEX:    '/(tabs)',
+    ADVICE:   '/(tabs)/advice',
+    EXPLORE:  '/(tabs)/explore',
+    HISTORY:  '/(tabs)/history',
+    SETTINGS: '/(tabs)/settings',
   },
 
   SETTINGS: {
-    PROFILE:          '/ProfileScreen',
-    SUPPORT:          '/SupportScreen',
-    SECURITY_DETAIL:  '/SecurityScreen',
-    NOTIFICATIONS:    '/NotificationsScreen',
+    PROFILE:         '/ProfileScreen',
+    SUPPORT:         '/SupportScreen',
+    SECURITY_DETAIL: '/SecurityScreen',
+    NOTIFICATIONS:   '/NotificationsScreen',
   },
 
   INSIGHTS: {
@@ -34,21 +34,27 @@ export const ROUTES = {
   },
 
   HEALTH: {
-    EXPORT:        '/export',
-    LOG_EXERCISE:  '/log-exercise',
-    LOG_MEDICATION:'/log-medication',
-    LOG_GLUCOSE:   '/LogGlucoseScreen',
-    FOOD_LOG:      '/FoodLogScreen',
-    REPORTS:       '/reports',
-    REPOSITORY:    '/RepositoryScreen',
-    HISTORY:       '/history',
+    EXPORT:         '/export',
+    LOG_EXERCISE:   '/log-exercise',
+    LOG_MEDICATION: '/log-medication',
+    LOG_GLUCOSE:    '/LogGlucoseScreen',
+    FOOD_LOG:       '/FoodLogScreen',
+    REPORTS:        '/reports',
+    REPOSITORY:     '/RepositoryScreen',
+    HISTORY:        '/history',
+  },
+
+  RECIPES: {
+    LIST:    '/RecipesScreen',
+    BUILDER: '/RecipeBuilderScreen',
   },
 } as const;
 
-// Tipo utilitario para usar con router.push()
+// Tipo utilitario para router.push()
 export type AppRoute =
   | typeof ROUTES.AUTH[keyof typeof ROUTES.AUTH]
   | typeof ROUTES.TABS[keyof typeof ROUTES.TABS]
   | typeof ROUTES.SETTINGS[keyof typeof ROUTES.SETTINGS]
   | typeof ROUTES.INSIGHTS[keyof typeof ROUTES.INSIGHTS]
-  | typeof ROUTES.HEALTH[keyof typeof ROUTES.HEALTH];
+  | typeof ROUTES.HEALTH[keyof typeof ROUTES.HEALTH]
+  | typeof ROUTES.RECIPES[keyof typeof ROUTES.RECIPES];

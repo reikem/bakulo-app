@@ -15,6 +15,7 @@ import {
   PlusCircle, ShieldCheck, Target, Utensils,
   Droplets, ChevronRight, History, FileText,
   Settings, Syringe, Lightbulb, Dumbbell, FolderOpen,
+  ShieldAlert,
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { BloodSugarChart } from '@/components/ui/BloodSugarChart';
@@ -231,6 +232,24 @@ export default function DashboardScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* ── Botón SOS Emergencia ── */}
+        <TouchableOpacity
+          style={styles.sosCard}
+          activeOpacity={0.85}
+          onPress={() => router.push('/EmergencySOSScreen')}
+        >
+          <View style={styles.sosIconWrap}>
+            <ShieldAlert color="white" size={28} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.sosTitle}>Emergencia SOS</Text>
+            <Text style={styles.sosSub}>
+              Alerta a tus contactos con ubicación y glucosa en tiempo real
+            </Text>
+          </View>
+          <ChevronRight color="#fda4af" size={18} />
+        </TouchableOpacity>
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -298,4 +317,9 @@ const styles = StyleSheet.create({
   featuredIcon:   { width: 52, height: 52, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
   featuredLabel:  { fontSize: 14, fontWeight: '800', lineHeight: 20 },
   featuredArrow:  { alignSelf: 'flex-end', marginTop: 4 },
+
+  sosCard:        { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: 'rgba(186,26,26,0.12)', borderRadius: 24, padding: 18, marginTop: 14, borderWidth: 1, borderColor: 'rgba(239,68,68,0.25)' },
+  sosIconWrap:    { width: 52, height: 52, borderRadius: 16, backgroundColor: '#ba1a1a', alignItems: 'center', justifyContent: 'center' },
+  sosTitle:       { color: '#fda4af', fontSize: 16, fontWeight: '800', marginBottom: 3 },
+  sosSub:         { color: '#6f787d', fontSize: 11, lineHeight: 16 },
 });

@@ -1,10 +1,9 @@
 /**
- * app/(tabs)/_layout.tsx — Layout de tabs
+ * app/(tabs)/_layout.tsx — Layout de tabs v2
  *
  * ✅ Solo define la barra de navegación inferior
- * ✅ NO repite providers (ya están en app/_layout.tsx)
- * ✅ Las pantallas dentro de (tabs) que no son tabs reales
- *    (InsightsScreen, DailyTasksScreen, etc.) se ocultan de la tab bar
+ * ✅ NO repite providers (están en app/_layout.tsx)
+ * ✅ Pantallas no-tab ocultas con href: null
  */
 
 import React from 'react';
@@ -17,7 +16,7 @@ type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
 function TabIcon({ name, focused }: { name: IoniconsName; focused: boolean }) {
   return (
     <Ionicons
-      name={focused ? name : `${name}-outline` as IoniconsName}
+      name={focused ? name : (`${name}-outline`) as IoniconsName}
       size={24}
       color={focused ? '#6C63FF' : '#8E8E93'}
     />
@@ -37,15 +36,12 @@ export default function TabsLayout() {
           paddingBottom: Platform.OS === 'ios' ? 25 : 10,
           paddingTop: 8,
         },
-        tabBarActiveTintColor: '#6C63FF',
+        tabBarActiveTintColor:   '#6C63FF',
         tabBarInactiveTintColor: '#8E8E93',
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '500',
-        },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
       }}
     >
-      {/* ── Tabs visibles ──────────────────────────────────────────────── */}
+      {/* ── Tabs visibles en la barra ────────────────────────────────── */}
 
       <Tabs.Screen
         name="index"
@@ -83,28 +79,14 @@ export default function TabsLayout() {
         }}
       />
 
-      {/* ── Pantallas dentro de (tabs) que NO aparecen en la tab bar ───── */}
+      {/* ── Pantallas dentro de (tabs) sin tab bar ───────────────────── */}
 
-      <Tabs.Screen
-        name="InsightsScreen"
-        options={{ href: null }}
-      />
-      <Tabs.Screen
-        name="DailyTasksScreen"
-        options={{ href: null }}
-      />
-      <Tabs.Screen
-        name="ArticleDetail"
-        options={{ href: null }}
-      />
-      <Tabs.Screen
-        name="NutritionList"
-        options={{ href: null }}
-      />
-      <Tabs.Screen
-        name="LogGlucoseScreen"
-        options={{ href: null }}
-      />
+      <Tabs.Screen name="InsightsScreen"   options={{ href: null }} />
+      <Tabs.Screen name="DailyTasksScreen" options={{ href: null }} />
+      <Tabs.Screen name="ArticleDetail"    options={{ href: null }} />
+      <Tabs.Screen name="NutritionList"    options={{ href: null }} />
+      <Tabs.Screen name="LogGlucoseScreen" options={{ href: null }} />
+      <Tabs.Screen name="DashboardScreen"  options={{ href: null }} />
 
     </Tabs>
   );
