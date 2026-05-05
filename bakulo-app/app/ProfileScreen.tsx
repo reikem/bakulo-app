@@ -1,9 +1,12 @@
 /**
- * ProfileScreen.tsx — v2 operativo
- * - Conecta Apple Health / Google Health Connect / Huawei Health
- * - Muestra estado de conexión real
- * - Exporta reporte vía Share
- * - Edita metas de glucosa
+ * ProfileScreen.tsx — v3
+ *
+ * ✅ Muestra datos reales del usuario autenticado (Supabase + SQLite)
+ * ✅ Avatar con iniciales como placeholder si no hay foto
+ * ✅ Botón refresh para recargar desde Supabase
+ * ✅ Badge de email verificado / sin verificar
+ * ✅ Cierre de sesión limpio (Supabase + SQLite local)
+ * ✅ Logros, rachas y ecosistema de salud
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -11,24 +14,27 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Modal, TextInput, Alert, SafeAreaView, Image, ActivityIndicator,
 } from 'react-native';
+import { Share } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
-  ArrowLeft, Settings, Heart, Activity, Smartphone,
-  Share2, Edit3, CheckCircle, XCircle, RefreshCw, ChevronRight,
-  Flame, Trophy, Zap, Star,
+  ArrowLeft, Heart, Activity, Smartphone,
+  Share2, Edit3, CheckCircle, XCircle, ChevronRight,
+  Flame, Trophy, Zap, Star, RefreshCw, LogOut,
 } from 'lucide-react-native';
-import { Share } from 'react-native';
 import { healthService, HealthConnection, HealthProvider } from '@/service/healthService';
 import { useAppStore } from '@/store/AppStore';
+import { authLogout } from '@/service/authService';
 
 // ─── PROVIDER ICON ────────────────────────────────────────────────────────────
+
 function ProviderIcon({ id, size = 22 }: { id: HealthProvider; size?: number }) {
-  if (id === 'apple')  return <Heart   color="#ff2d55" size={size} fill="#ff2d55" />;
+  if (id === 'apple')  return <Heart    color="#ff2d55" size={size} fill="#ff2d55" />;
   if (id === 'google') return <Activity color="#4285f4" size={size} />;
   return <Smartphone color="#cf0a2c" size={size} />;
 }
 
 // ─── ECOSYSTEM ITEM ───────────────────────────────────────────────────────────
+
 function EcosystemItem({ conn, onToggle, loading }: {
   conn: HealthConnection; onToggle: () => void; loading: boolean;
 }) {
@@ -52,9 +58,7 @@ function EcosystemItem({ conn, onToggle, loading }: {
             : 'Toca para conectar'}
         </Text>
         {conn.connected && conn.glucoseData && conn.glucoseData.length > 0 && (
-          <Text style={s.ecoDataText}>
-            {conn.glucoseData.length} lecturas importadas
-          </Text>
+          <Text style={s.ecoDataText}>{conn.glucoseData.length} lecturas importadas</Text>
         )}
       </View>
       {loading ? (
@@ -71,7 +75,10 @@ function EcosystemItem({ conn, onToggle, loading }: {
 }
 
 // ─── HEALTH STATS ─────────────────────────────────────────────────────────────
-function HealthStatsCard({ avg, trend, inRange }: { avg: number; trend: string; inRange: number }) {
+
+function HealthStatsCard({ avg, trend, inRange }: {
+  avg: number; trend: string; inRange: number;
+}) {
   return (
     <View style={s.statsCard}>
       <Text style={s.statsLabel}>PROMEDIO 14 DÍAS</Text>
@@ -83,46 +90,62 @@ function HealthStatsCard({ avg, trend, inRange }: { avg: number; trend: string; 
         </View>
       </View>
       <View style={s.progressOuter}>
-        <View style={[s.progressInner, { width: `${inRange}%` }]} />
+        <View style={[s.progressInner, { width: `${inRange}%` as any }]} />
       </View>
       <Text style={s.progressLabel}>{inRange}% tiempo en rango objetivo</Text>
     </View>
   );
 }
 
-// ─── MAIN SCREEN ─────────────────────────────────────────────────────────────
+// ─── MAIN ─────────────────────────────────────────────────────────────────────
+
 export default function ProfileScreen() {
   const router = useRouter();
-  const { glucoseEntries, streakData, unlockedRewards, rewards } = useAppStore();
+  const {
+    glucoseEntries,
+    streakData,
+    unlockedRewards,
+    rewards,
+    currentUser,
+    refreshCurrentUser,
+    clearUserData,
+  } = useAppStore();
 
   const [connections,   setConnections]   = useState<HealthConnection[]>([]);
   const [loadingId,     setLoadingId]     = useState<HealthProvider | null>(null);
   const [modalVisible,  setModalVisible]  = useState(false);
   const [glucoseTarget, setGlucoseTarget] = useState('70–140');
+  const [refreshing,    setRefreshing]    = useState(false);
 
-  // Estadísticas calculadas desde el store
+  // ── Stats solo del usuario actual (las entradas ya son del user logueado) ──
   const last14 = glucoseEntries.filter(e =>
     e.timestamp >= new Date(Date.now() - 14 * 24 * 3600 * 1000)
   );
   const avg14 = last14.length
-    ? Math.round(last14.reduce((s, e) => s + e.value, 0) / last14.length)
+    ? Math.round(last14.reduce((sum, e) => sum + e.value, 0) / last14.length)
     : 108;
   const inRange14 = last14.length
-    ? Math.round((last14.filter(e => e.value >= 70 && e.value <= 140).length / last14.length) * 100)
+    ? Math.round(
+        (last14.filter(e => e.value >= 70 && e.value <= 140).length / last14.length) * 100
+      )
     : 82;
-  const [min, max] = glucoseTarget.replace('–','-').split('-').map(Number);
-  const trend = avg14 > (avg14 + 5) ? '+4%' : '-4%';
+  const trendLabel = avg14 > 160 ? '↑ Alto' : avg14 < 70 ? '↓ Bajo' : '✓ Estable';
 
   useEffect(() => {
     healthService.getConnections().then(setConnections);
   }, []);
 
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await refreshCurrentUser();
+    setRefreshing(false);
+  };
+
   const handleToggle = useCallback(async (id: HealthProvider) => {
     setLoadingId(id);
     const ok = await healthService.toggleConnection(id);
     if (!ok) Alert.alert('Error', 'No se pudo actualizar la conexión.');
-    const updated = await healthService.getConnections();
-    setConnections(updated);
+    setConnections(await healthService.getConnections());
     setLoadingId(null);
   }, []);
 
@@ -130,39 +153,90 @@ export default function ProfileScreen() {
     await Share.share({
       message:
         `📊 Reporte de Salud — Serenity\n` +
+        `• Usuario: ${displayName}\n` +
+        `• Email: ${displayEmail}\n` +
         `• Glucosa promedio (14d): ${avg14} mg/dL\n` +
         `• Tiempo en rango: ${inRange14}%\n` +
         `• Objetivo: ${glucoseTarget} mg/dL\n` +
-        `Generado el ${new Date().toLocaleDateString()}`,
+        `Generado el ${new Date().toLocaleDateString('es')}`,
     });
   };
 
+  const handleLogout = () => {
+    Alert.alert(
+      'Cerrar sesión',
+      `¿Salir de la cuenta de ${displayName}?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Cerrar sesión',
+          style: 'destructive',
+          onPress: async () => {
+              await authLogout();
+              clearUserData();   // limpia entradas, notificaciones, currentUser
+              router.replace('/login');
+            },
+        },
+      ]
+    );
+  };
+
+  // ── Datos del usuario para la UI ──────────────────────────────────────────
+  const displayName   = currentUser?.displayName || currentUser?.username || 'Usuario';
+  const displayEmail  = currentUser?.email ?? '';
+  const displayAvatar = currentUser?.avatarUrl ?? null;
+  const isVerified    = currentUser?.activated !== false;
+  const initials      = displayName
+    .split(' ')
+    .map((w: string) => w[0] ?? '')
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+
   return (
     <SafeAreaView style={s.container}>
+
+      {/* ── Navbar ─────────────────────────────────────────────────────────── */}
       <View style={s.navbar}>
         <TouchableOpacity onPress={() => router.back()} style={s.iconBtn}>
           <ArrowLeft color="#c4ebe0" size={24} />
         </TouchableOpacity>
-        <Text style={s.navTitle}>Perfil</Text>
-        <TouchableOpacity style={s.iconBtn}>
-          <Settings color="#c4ebe0" size={24} />
+        <Text style={s.navTitle}>Mi Perfil</Text>
+        <TouchableOpacity style={s.iconBtn} onPress={handleRefresh} disabled={refreshing}>
+          {refreshing
+            ? <ActivityIndicator color="#c4ebe0" size="small" />
+            : <RefreshCw color="#c4ebe0" size={20} />}
         </TouchableOpacity>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.scroll}>
-        {/* Avatar + nombre */}
+
+        {/* ── Hero: avatar + nombre real ──────────────────────────────────── */}
         <View style={s.heroSection}>
-          <Image
-            source={{ uri: 'https://i.pravatar.cc/300?img=45' }}
-            style={s.avatar}
-          />
-          <View>
-            <Text style={s.name}>Elena Rodríguez</Text>
-            <Text style={s.condition}>Diabetes Tipo 1 · 32 años</Text>
+          {displayAvatar ? (
+            <Image source={{ uri: displayAvatar }} style={s.avatar} />
+          ) : (
+            <View style={[s.avatar, s.avatarPlaceholder]}>
+              <Text style={s.avatarInitials}>{initials}</Text>
+            </View>
+          )}
+
+          <View style={{ flex: 1, gap: 3 }}>
+            <Text style={s.name} numberOfLines={1}>{displayName}</Text>
+            <Text style={s.emailText} numberOfLines={1}>{displayEmail}</Text>
+            {isVerified ? (
+              <View style={s.verifiedBadge}>
+                <Text style={s.verifiedTxt}>✓ Cuenta verificada</Text>
+              </View>
+            ) : (
+              <View style={s.unverifiedBadge}>
+                <Text style={s.unverifiedTxt}>⚠️ Email sin verificar</Text>
+              </View>
+            )}
           </View>
         </View>
 
-        {/* Acciones */}
+        {/* ── Acciones ───────────────────────────────────────────────────── */}
         <View style={s.actionRow}>
           <TouchableOpacity style={s.primaryBtn} onPress={() => setModalVisible(true)}>
             <Edit3 color="#fff" size={16} />
@@ -174,16 +248,73 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Stats */}
-        <HealthStatsCard avg={avg14} trend={trend} inRange={inRange14} />
+        {/* ── Stats glucosa ───────────────────────────────────────────────── */}
+        <HealthStatsCard avg={avg14} trend={trendLabel} inRange={inRange14} />
 
-        {/* Benchmark */}
+        {/* ── Rango objetivo ─────────────────────────────────────────────── */}
         <View style={s.benchmarkCard}>
           <Text style={s.benchLabel}>RANGO OBJETIVO</Text>
-          <Text style={s.benchValue}>{glucoseTarget} <Text style={s.benchUnit}>mg/dL</Text></Text>
+          <Text style={s.benchValue}>
+            {glucoseTarget} <Text style={s.benchUnit}>mg/dL</Text>
+          </Text>
         </View>
 
-        {/* Ecosistema de salud */}
+        {/* ── Rachas y XP ────────────────────────────────────────────────── */}
+        <Text style={s.sectionTitle}>Actividad y Rachas</Text>
+        <View style={s.streakRow}>
+          {[
+            { icon: <Flame color="#f59e0b" size={20} fill="#f59e0b" />, val: streakData.currentStreak, lbl: 'Racha actual' },
+            { icon: <Star  color="#fbbf24" size={20} fill="#fbbf24" />, val: streakData.longestStreak, lbl: 'Récord'       },
+            { icon: <Zap   color="#86d0ef" size={20}                />, val: streakData.totalXP,       lbl: 'XP total'    },
+            { icon: <Trophy color="#c4b5fd" size={20}               />, val: `Nv.${streakData.level}`, lbl: 'Nivel'       },
+          ].map((item, i) => (
+            <View key={i} style={s.streakBox}>
+              {item.icon}
+              <Text style={s.streakVal}>{item.val}</Text>
+              <Text style={s.streakLbl}>{item.lbl}</Text>
+            </View>
+          ))}
+        </View>
+
+        {/* ── Logros ─────────────────────────────────────────────────────── */}
+        <View style={s.awardsHeader}>
+          <Text style={s.sectionTitle}>Logros</Text>
+          <Text style={s.awardsCount}>{unlockedRewards.length}/{rewards.length}</Text>
+        </View>
+        <Text style={[s.sectionSub, { marginBottom: 12 }]}>Premios obtenidos hasta ahora</Text>
+
+        {unlockedRewards.length === 0 ? (
+          <View style={s.awardsEmpty}>
+            <Trophy color="#2a3436" size={28} />
+            <Text style={s.awardsEmptyTxt}>Completa tareas para desbloquear logros</Text>
+          </View>
+        ) : (
+          <View style={s.awardsGrid}>
+            {unlockedRewards.map(r => (
+              <View key={r.id} style={s.awardCard}>
+                <Text style={s.awardIcon}>{r.icon}</Text>
+                <Text style={s.awardTitle} numberOfLines={1}>{r.title}</Text>
+                <Text style={s.awardDesc}  numberOfLines={2}>{r.description}</Text>
+                {r.unlockedAt && (
+                  <Text style={s.awardDate}>
+                    {new Date(r.unlockedAt).toLocaleDateString('es', { day: 'numeric', month: 'short' })}
+                  </Text>
+                )}
+              </View>
+            ))}
+            {rewards.filter(r => !r.unlockedAt).slice(0, 2).map(r => (
+              <View key={r.id} style={[s.awardCard, s.awardCardLocked]}>
+                <Text style={[s.awardIcon, { opacity: 0.2 }]}>{r.icon}</Text>
+                <Text style={[s.awardTitle, { color: '#2a3436' }]} numberOfLines={1}>{r.title}</Text>
+                <View style={s.lockedBadge}>
+                  <Text style={s.lockedTxt}>🔒 {r.xpRequired} XP</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* ── Ecosistema de salud ─────────────────────────────────────────── */}
         <Text style={s.sectionTitle}>Ecosistema de Salud</Text>
         <Text style={s.sectionSub}>Conecta tus apps para importar datos automáticamente</Text>
         <View style={s.ecoContainer}>
@@ -199,76 +330,15 @@ export default function ProfileScreen() {
           ))}
         </View>
 
-        {/* Rachas y XP */}
-        <Text style={s.sectionTitle}>Actividad y Rachas</Text>
-        <View style={s.streakRow}>
-          <View style={s.streakBox}>
-            <Flame color="#f59e0b" size={22} fill="#f59e0b" />
-            <Text style={s.streakVal}>{streakData.currentStreak}</Text>
-            <Text style={s.streakLbl}>Racha actual</Text>
-          </View>
-          <View style={s.streakBox}>
-            <Star color="#fbbf24" size={22} fill="#fbbf24" />
-            <Text style={s.streakVal}>{streakData.longestStreak}</Text>
-            <Text style={s.streakLbl}>Récord</Text>
-          </View>
-          <View style={s.streakBox}>
-            <Zap color="#86d0ef" size={22} />
-            <Text style={s.streakVal}>{streakData.totalXP}</Text>
-            <Text style={s.streakLbl}>XP total</Text>
-          </View>
-          <View style={s.streakBox}>
-            <Trophy color="#c4b5fd" size={22} />
-            <Text style={s.streakVal}>Nv.{streakData.level}</Text>
-            <Text style={s.streakLbl}>Nivel</Text>
-          </View>
-        </View>
-
-        {/* Logros desbloqueados */}
-        <View style={s.awardsHeader}>
-          <Text style={s.sectionTitle}>Logros</Text>
-          <Text style={s.awardsCount}>{unlockedRewards.length}/{rewards.length}</Text>
-        </View>
-        <Text style={[s.sectionSub, { marginBottom: 12 }]}>Premios obtenidos hasta ahora</Text>
-        {unlockedRewards.length === 0 ? (
-          <View style={s.awardsEmpty}>
-            <Trophy color="#2a3436" size={28} />
-            <Text style={s.awardsEmptyTxt}>Completa tareas para desbloquear logros</Text>
-          </View>
-        ) : (
-          <View style={s.awardsGrid}>
-            {unlockedRewards.map(r => (
-              <View key={r.id} style={s.awardCard}>
-                <Text style={s.awardIcon}>{r.icon}</Text>
-                <Text style={s.awardTitle} numberOfLines={1}>{r.title}</Text>
-                <Text style={s.awardDesc} numberOfLines={2}>{r.description}</Text>
-                {r.unlockedAt && (
-                  <Text style={s.awardDate}>
-                    {new Date(r.unlockedAt).toLocaleDateString('es', { day:'numeric', month:'short' })}
-                  </Text>
-                )}
-              </View>
-            ))}
-            {/* Locked preview */}
-            {rewards.filter(r => !r.unlockedAt).slice(0,2).map(r => (
-              <View key={r.id} style={[s.awardCard, s.awardCardLocked]}>
-                <Text style={[s.awardIcon, { opacity: 0.2 }]}>{r.icon}</Text>
-                <Text style={[s.awardTitle, { color: '#2a3436' }]} numberOfLines={1}>{r.title}</Text>
-                <View style={s.lockedBadge}>
-                  <Text style={s.lockedTxt}>🔒 {r.xpRequired} XP</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* Sign out */}
-        <TouchableOpacity style={s.signOutBtn} onPress={() => router.replace('/login')}>
+        {/* ── Cerrar sesión ───────────────────────────────────────────────── */}
+        <TouchableOpacity style={s.signOutBtn} onPress={handleLogout} activeOpacity={0.8}>
+          <LogOut color="#ef4444" size={18} />
           <Text style={s.signOutText}>Cerrar Sesión</Text>
         </TouchableOpacity>
+
       </ScrollView>
 
-      {/* Modal editar meta */}
+      {/* ── Modal: editar meta de glucosa ───────────────────────────────── */}
       <Modal animationType="slide" transparent visible={modalVisible}>
         <View style={s.modalOverlay}>
           <View style={s.modalContent}>
@@ -281,85 +351,99 @@ export default function ProfileScreen() {
               placeholder="70–140"
               placeholderTextColor="#3f484c"
             />
-            <TouchableOpacity
-              style={s.modalSaveBtn}
-              onPress={() => setModalVisible(false)}
-            >
+            <TouchableOpacity style={s.modalSaveBtn} onPress={() => setModalVisible(false)}>
               <Text style={s.modalSaveBtnText}>Confirmar Cambios</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
+
     </SafeAreaView>
   );
 }
 
+// ─── STYLES ───────────────────────────────────────────────────────────────────
+
 const s = StyleSheet.create({
-  container:      { flex: 1, backgroundColor: '#171d1e' },
-  navbar:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
-  navTitle:       { color: '#c4ebe0', fontSize: 16, fontWeight: '700' },
-  iconBtn:        { padding: 8 },
-  scroll:         { paddingHorizontal: 24, paddingBottom: 40 },
-  heroSection:    { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 24 },
-  avatar:         { width: 64, height: 64, borderRadius: 32, borderWidth: 2, borderColor: '#1a6c3c' },
-  name:           { color: '#c4ebe0', fontSize: 22, fontWeight: '800' },
-  condition:      { color: '#6f787d', fontSize: 13, marginTop: 2 },
-  actionRow:      { flexDirection: 'row', gap: 12, marginBottom: 24 },
-  primaryBtn:     { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#004e63', paddingVertical: 12, borderRadius: 100 },
-  secondaryBtn:   { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', paddingVertical: 12, borderRadius: 100 },
-  btnText:        { color: '#fff', fontWeight: '700', fontSize: 13 },
-  btnTextSec:     { color: '#c4ebe0', fontWeight: '700', fontSize: 13 },
-  statsCard:      { backgroundColor: '#1d2426', borderRadius: 24, padding: 20, marginBottom: 12 },
-  statsLabel:     { color: '#42655d', fontSize: 9, fontWeight: '800', letterSpacing: 1.2, marginBottom: 6 },
-  statsRow:       { flexDirection: 'row', alignItems: 'baseline', marginBottom: 12 },
-  statsValue:     { color: '#86d0ef', fontSize: 40, fontWeight: '800' },
-  statsUnit:      { color: '#6f787d', fontSize: 14 },
-  trendBadge:     { marginLeft: 8, backgroundColor: 'rgba(34,197,94,0.15)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 100 },
-  trendText:      { color: '#22c55e', fontSize: 11, fontWeight: '700' },
-  progressOuter:  { height: 6, backgroundColor: '#333b3d', borderRadius: 10 },
-  progressInner:  { height: '100%', backgroundColor: '#006782', borderRadius: 10 },
-  progressLabel:  { color: '#6f787d', fontSize: 11, marginTop: 6 },
-  benchmarkCard:  { backgroundColor: 'rgba(0,103,130,0.12)', borderRadius: 20, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: 'rgba(0,103,130,0.25)' },
-  benchLabel:     { color: '#6f787d', fontSize: 9, fontWeight: '800', letterSpacing: 1 },
-  benchValue:     { color: '#86d0ef', fontSize: 24, fontWeight: '800', marginTop: 4 },
-  benchUnit:      { fontSize: 14, fontWeight: '400', color: '#6f787d' },
-  sectionTitle:   { color: '#f5fafb', fontSize: 18, fontWeight: '800', marginBottom: 4 },
-  sectionSub:     { color: '#6f787d', fontSize: 12, marginBottom: 16 },
-  ecoContainer:   { backgroundColor: '#1d2426', borderRadius: 24, overflow: 'hidden', marginBottom: 24 },
-  ecoItem:        { flexDirection: 'row', alignItems: 'center', padding: 18, gap: 14 },
-  ecoItemDisabled:{ opacity: 0.4 },
-  ecoIconBox:     { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  ecoInfo:        { flex: 1 },
-  ecoName:        { color: '#f5fafb', fontSize: 15, fontWeight: '700' },
-  ecoSub:         { color: '#6f787d', fontSize: 11, marginTop: 2 },
-  ecoDataText:    { color: '#22c55e', fontSize: 10, fontWeight: '600', marginTop: 3 },
-  ecoDivider:     { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.06)', marginHorizontal: 18 },
-  signOutBtn:     { borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', borderRadius: 20, padding: 16, alignItems: 'center' },
-  signOutText:    { color: '#6f787d', fontWeight: '700' },
+  container:        { flex: 1, backgroundColor: '#171d1e' },
+  navbar:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
+  navTitle:         { color: '#c4ebe0', fontSize: 16, fontWeight: '700' },
+  iconBtn:          { padding: 8 },
+  scroll:           { paddingHorizontal: 24, paddingBottom: 40 },
 
-  streakRow:      { flexDirection: 'row', gap: 10, marginBottom: 24 },
-  streakBox:      { flex: 1, backgroundColor: '#1d2426', borderRadius: 18, padding: 12, alignItems: 'center', gap: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
-  streakVal:      { color: '#ecf2f3', fontSize: 18, fontWeight: '800' },
-  streakLbl:      { color: '#6f787d', fontSize: 9, fontWeight: '700', textAlign: 'center' },
+  heroSection:      { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 24 },
+  avatar:           { width: 68, height: 68, borderRadius: 34, borderWidth: 2, borderColor: '#006782' },
+  avatarPlaceholder:{ backgroundColor: '#004e63', alignItems: 'center', justifyContent: 'center' },
+  avatarInitials:   { color: '#c4ebe0', fontSize: 24, fontWeight: '800' },
+  name:             { color: '#c4ebe0', fontSize: 20, fontWeight: '800' },
+  emailText:        { color: '#6f787d', fontSize: 12, marginTop: 1 },
+  verifiedBadge:    { alignSelf: 'flex-start', backgroundColor: 'rgba(34,197,94,0.1)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginTop: 4 },
+  verifiedTxt:      { color: '#22c55e', fontSize: 10, fontWeight: '700' },
+  unverifiedBadge:  { alignSelf: 'flex-start', backgroundColor: 'rgba(245,158,11,0.1)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, marginTop: 4 },
+  unverifiedTxt:    { color: '#f59e0b', fontSize: 10, fontWeight: '700' },
 
-  awardsHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 },
-  awardsCount:    { color: '#86d0ef', fontSize: 13, fontWeight: '800' },
-  awardsEmpty:    { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#1d2426', borderRadius: 16, padding: 16, marginBottom: 24 },
-  awardsEmptyTxt: { color: '#6f787d', fontSize: 12, flex: 1 },
-  awardsGrid:     { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 },
-  awardCard:      { width: '47%', backgroundColor: '#1a2820', borderRadius: 18, padding: 14, gap: 3, borderWidth: 1, borderColor: 'rgba(34,197,94,0.15)' },
-  awardCardLocked:{ backgroundColor: '#1a1a1a', borderColor: 'rgba(255,255,255,0.04)' },
-  awardIcon:      { fontSize: 28, marginBottom: 2 },
-  awardTitle:     { color: '#c4ebe0', fontSize: 12, fontWeight: '800' },
-  awardDesc:      { color: '#6f787d', fontSize: 10, lineHeight: 14 },
-  awardDate:      { color: '#22c55e', fontSize: 9, fontWeight: '700', marginTop: 2 },
-  lockedBadge:    { marginTop: 4 },
-  lockedTxt:      { color: '#3f484c', fontSize: 10, fontWeight: '700' },
-  modalOverlay:   { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', padding: 24 },
-  modalContent:   { backgroundColor: '#1d2426', padding: 30, borderRadius: 32 },
-  modalTitle:     { color: '#c4ebe0', fontSize: 22, fontWeight: '800', marginBottom: 20 },
-  modalLabel:     { color: '#6f787d', fontSize: 12, fontWeight: '700', marginBottom: 8 },
-  modalInput:     { backgroundColor: '#171d1e', color: '#fff', padding: 15, borderRadius: 16, marginBottom: 20, fontSize: 16 },
-  modalSaveBtn:   { backgroundColor: '#006782', padding: 18, borderRadius: 100, alignItems: 'center' },
+  actionRow:        { flexDirection: 'row', gap: 12, marginBottom: 24 },
+  primaryBtn:       { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#004e63', paddingVertical: 12, borderRadius: 100 },
+  secondaryBtn:     { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', paddingVertical: 12, borderRadius: 100 },
+  btnText:          { color: '#fff', fontWeight: '700', fontSize: 13 },
+  btnTextSec:       { color: '#c4ebe0', fontWeight: '700', fontSize: 13 },
+
+  statsCard:        { backgroundColor: '#1d2426', borderRadius: 24, padding: 20, marginBottom: 12 },
+  statsLabel:       { color: '#42655d', fontSize: 9, fontWeight: '800', letterSpacing: 1.2, marginBottom: 6 },
+  statsRow:         { flexDirection: 'row', alignItems: 'baseline', marginBottom: 12 },
+  statsValue:       { color: '#86d0ef', fontSize: 40, fontWeight: '800' },
+  statsUnit:        { color: '#6f787d', fontSize: 14 },
+  trendBadge:       { marginLeft: 8, backgroundColor: 'rgba(34,197,94,0.15)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 100 },
+  trendText:        { color: '#22c55e', fontSize: 11, fontWeight: '700' },
+  progressOuter:    { height: 6, backgroundColor: '#333b3d', borderRadius: 10 },
+  progressInner:    { height: '100%', backgroundColor: '#006782', borderRadius: 10 },
+  progressLabel:    { color: '#6f787d', fontSize: 11, marginTop: 6 },
+
+  benchmarkCard:    { backgroundColor: 'rgba(0,103,130,0.12)', borderRadius: 20, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: 'rgba(0,103,130,0.25)' },
+  benchLabel:       { color: '#6f787d', fontSize: 9, fontWeight: '800', letterSpacing: 1 },
+  benchValue:       { color: '#86d0ef', fontSize: 24, fontWeight: '800', marginTop: 4 },
+  benchUnit:        { fontSize: 14, fontWeight: '400', color: '#6f787d' },
+
+  sectionTitle:     { color: '#f5fafb', fontSize: 18, fontWeight: '800', marginBottom: 4 },
+  sectionSub:       { color: '#6f787d', fontSize: 12, marginBottom: 16 },
+
+  streakRow:        { flexDirection: 'row', gap: 10, marginBottom: 24 },
+  streakBox:        { flex: 1, backgroundColor: '#1d2426', borderRadius: 18, padding: 12, alignItems: 'center', gap: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  streakVal:        { color: '#ecf2f3', fontSize: 16, fontWeight: '800' },
+  streakLbl:        { color: '#6f787d', fontSize: 9, fontWeight: '700', textAlign: 'center' },
+
+  awardsHeader:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 },
+  awardsCount:      { color: '#86d0ef', fontSize: 13, fontWeight: '800' },
+  awardsEmpty:      { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#1d2426', borderRadius: 16, padding: 16, marginBottom: 24 },
+  awardsEmptyTxt:   { color: '#6f787d', fontSize: 12, flex: 1 },
+  awardsGrid:       { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 24 },
+  awardCard:        { width: '47%', backgroundColor: '#1a2820', borderRadius: 18, padding: 14, gap: 3, borderWidth: 1, borderColor: 'rgba(34,197,94,0.15)' },
+  awardCardLocked:  { backgroundColor: '#1a1a1a', borderColor: 'rgba(255,255,255,0.04)' },
+  awardIcon:        { fontSize: 28, marginBottom: 2 },
+  awardTitle:       { color: '#c4ebe0', fontSize: 12, fontWeight: '800' },
+  awardDesc:        { color: '#6f787d', fontSize: 10, lineHeight: 14 },
+  awardDate:        { color: '#22c55e', fontSize: 9, fontWeight: '700', marginTop: 2 },
+  lockedBadge:      { marginTop: 4 },
+  lockedTxt:        { color: '#3f484c', fontSize: 10, fontWeight: '700' },
+
+  ecoContainer:     { backgroundColor: '#1d2426', borderRadius: 24, overflow: 'hidden', marginBottom: 24 },
+  ecoItem:          { flexDirection: 'row', alignItems: 'center', padding: 18, gap: 14 },
+  ecoItemDisabled:  { opacity: 0.4 },
+  ecoIconBox:       { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  ecoInfo:          { flex: 1 },
+  ecoName:          { color: '#f5fafb', fontSize: 15, fontWeight: '700' },
+  ecoSub:           { color: '#6f787d', fontSize: 11, marginTop: 2 },
+  ecoDataText:      { color: '#22c55e', fontSize: 10, fontWeight: '600', marginTop: 3 },
+  ecoDivider:       { height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.06)', marginHorizontal: 18 },
+
+  signOutBtn:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderColor: 'rgba(239,68,68,0.2)', borderRadius: 20, padding: 16, marginBottom: 8, backgroundColor: 'rgba(239,68,68,0.05)' },
+  signOutText:      { color: '#ef4444', fontWeight: '700', fontSize: 14 },
+
+  modalOverlay:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', padding: 24 },
+  modalContent:     { backgroundColor: '#1d2426', padding: 30, borderRadius: 32 },
+  modalTitle:       { color: '#c4ebe0', fontSize: 22, fontWeight: '800', marginBottom: 20 },
+  modalLabel:       { color: '#6f787d', fontSize: 12, fontWeight: '700', marginBottom: 8 },
+  modalInput:       { backgroundColor: '#171d1e', color: '#fff', padding: 15, borderRadius: 16, marginBottom: 20, fontSize: 16 },
+  modalSaveBtn:     { backgroundColor: '#006782', padding: 18, borderRadius: 100, alignItems: 'center' },
   modalSaveBtnText: { color: '#fff', fontWeight: '800' },
 });

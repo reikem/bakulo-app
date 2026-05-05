@@ -416,7 +416,7 @@ export default function EmergencySOSScreen() {
   const sendSMSToAll = useCallback(async (coords: { lat:number; lon:number } | null) => {
     const msg = buildMessage(userName, glucoseValue, coords);
 
-    if (smsAvailable && SMS.isAvailableAsync) {
+    if (smsAvailable && await SMS.isAvailableAsync()) {
       // expo-sms: envío nativo sin abrir app de mensajes (requiere iOS o permisos Android)
       try {
         const phones = contacts.map(c => c.phone);
@@ -741,7 +741,7 @@ export default function EmergencySOSScreen() {
             <StopCircle color="white" size={24}/>
             <View>
               <Text style={s.stopBtnTitle}>Llegué bien — Detener SOS</Text>
-              <Text style={s.stopBtnSub}>Enviará "estoy bien" a todos tus contactos</Text>
+              <Text style={s.stopBtnSub}>Enviará &quot;estoy bien&quot; a todos tus contactos</Text>
             </View>
           </TouchableOpacity>
         )}

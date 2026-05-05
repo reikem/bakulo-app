@@ -24,7 +24,7 @@ import {
 
 // ─── ENV VARS ─────────────────────────────────────────────────────────────────
 // Expo expone las variables con prefijo EXPO_PUBLIC_ al bundle
-const SUPPORT_EMAIL   = process.env.EXPO_PUBLIC_SUPPORT_EMAIL   ?? 'esjimmymeneses11@gmail.com';
+const SUPPORT_EMAIL   = process.env.EXPO_PUBLIC_SUPPORT_EMAIL   ?? 'jimmymeneses11@gmail.com';
 const GITHUB_ISSUES   = process.env.EXPO_PUBLIC_GITHUB_ISSUES_URL ?? 'https://github.com/reikem/bakulo-app/issues/new';
 const GITHUB_REPO     = process.env.EXPO_PUBLIC_GITHUB_REPO_URL   ?? 'https://github.com/reikem/bakulo-app';
 const APP_VERSION     = process.env.EXPO_PUBLIC_APP_VERSION        ?? '1.0.0';
@@ -401,7 +401,7 @@ export default function SupportScreen() {
         ) : (
           search.trim() ? (
             <View style={s.noResults}>
-              <Text style={s.noResultsText}>Sin resultados para "{search}&quot;</Text>
+              <Text style={s.noResultsText}>Sin resultados para &quot;{search}&quot;</Text>
             </View>
           ) : null
         )}

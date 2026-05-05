@@ -10,7 +10,11 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.tuusuario.bakuloapp", "adaptiveIcon": { "foregroundImage": "./assets/icon-fg.png", "backgroundColor": "#080e10" }
+      "bundleIdentifier": "com.tuusuario.bakuloapp",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon-fg.png",
+        "backgroundColor": "#080e10"
+      }
     },
     "android": {
       "package": "com.tuusuario.bakuloapp",
@@ -55,7 +59,8 @@
       "@react-native-community/datetimepicker",
       "react-native-ble-plx",
       "react-native-health",
-      "react-native-health-connect"
+      "react-native-health-connect",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

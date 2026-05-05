@@ -18,10 +18,27 @@
 
 import React, {
   createContext, useContext, useState,
-  useCallback, useMemo, useRef,
+  useCallback, useMemo, useRef, useEffect,
 } from 'react';
 import * as ExpoNotifications from 'expo-notifications';
 import { Platform } from 'react-native';
+
+// ─── PERSISTENCIA: SQLite + Supabase ─────────────────────────────────────────
+import {
+  db_saveGlucose,
+  db_saveExercise,
+  db_saveMeal,
+  db_saveMedication,
+  db_getCurrentUser,
+  AppUser,
+} from '@/service/database';
+import { authGetCurrentUser } from '@/service/authService';
+import {
+  upsertGlucoseEntry,
+  upsertExerciseEntry,
+  upsertMealEntry,
+  upsertMedicationEntry,
+} from '@/service/supabaseClient';
 
 // ─── CONFIGURACIÓN DE NOTIFICACIONES ─────────────────────────────────────────
 
@@ -52,7 +69,7 @@ export async function scheduleLocalNotification(
       content: { title, body, data, sound: true },
       trigger: delaySeconds <= 0
         ? null
-        : { seconds: delaySeconds } as any,
+        : { type: ExpoNotifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds: delaySeconds, repeats: false },
     });
   } catch (e) {
     console.warn('Notification error:', e);
@@ -198,8 +215,10 @@ const makeDate = (daysAgo: number, h = 8, m = 30) => {
 };
 
 // ─── DATOS INICIALES ─────────────────────────────────────────────────────────
+// Vacíos — los datos reales se cargan desde Supabase/SQLite al hacer login.
+// Los datos de demo solo aparecen si NO hay usuario logueado.
 
-const INITIAL_ENTRIES: AnyEntry[] = [
+const DEMO_ENTRIES: AnyEntry[] = [
   { id: 'g1', type: 'glucose', value: 108, timestamp: makeDate(0, 8, 30),  source: 'ble',    deviceName: 'Accu-Chek Instant', completed: true },
   { id: 'g2', type: 'glucose', value: 95,  timestamp: makeDate(0, 13, 0),  source: 'manual', completed: true },
   { id: 'g3', type: 'glucose', value: 122, timestamp: makeDate(1, 7, 45),  source: 'ble',    deviceName: 'Accu-Chek Instant', completed: true },
@@ -207,19 +226,25 @@ const INITIAL_ENTRIES: AnyEntry[] = [
   { id: 'g5', type: 'glucose', value: 88,  timestamp: makeDate(3, 9, 30),  source: 'manual', completed: true },
   { id: 'g6', type: 'glucose', value: 162, timestamp: makeDate(4, 7, 0),   source: 'manual', completed: true },
   { id: 'g7', type: 'glucose', value: 118, timestamp: makeDate(5, 8, 15),  source: 'ble',    completed: true },
-  { id: 'e1', type: 'exercise', activity: 'Running',    durationMinutes: 30, timestamp: makeDate(0, 7, 0),  completed: true },
-  { id: 'e2', type: 'exercise', activity: 'Gym',        durationMinutes: 45, timestamp: makeDate(2, 18, 0), completed: true },
-  { id: 'm1', type: 'meal',     name: 'Bowl de Avena',  category: 'Desayuno', calories: 320, carbs: 45, protein: 12, fat: 8,  timestamp: makeDate(0, 8, 0),  completed: true },
-  { id: 'm2', type: 'meal',     name: 'Ensalada Verde', category: 'Almuerzo', calories: 210, carbs: 18, protein: 15, fat: 6,  timestamp: makeDate(1, 12, 30), completed: true },
-  { id: 'med1', type: 'medication', medName: 'Metformina', medType: 'pastillas', dosage: '500mg', timestamp: makeDate(0, 8, 0),  completed: true },
+  { id: 'e1', type: 'exercise', activity: 'Running', durationMinutes: 30, timestamp: makeDate(0, 7, 0),  completed: true },
+  { id: 'e2', type: 'exercise', activity: 'Gym',     durationMinutes: 45, timestamp: makeDate(2, 18, 0), completed: true },
+  { id: 'm1', type: 'meal', name: 'Bowl de Avena',  category: 'Desayuno', calories: 320, carbs: 45, protein: 12, fat: 8, timestamp: makeDate(0, 8, 0),  completed: true },
+  { id: 'm2', type: 'meal', name: 'Ensalada Verde', category: 'Almuerzo', calories: 210, carbs: 18, protein: 15, fat: 6, timestamp: makeDate(1, 12, 30), completed: true },
+  { id: 'med1', type: 'medication', medName: 'Metformina', medType: 'pastillas',    dosage: '500mg', timestamp: makeDate(0, 8, 0),  completed: true },
   { id: 'med2', type: 'medication', medName: 'Insulina',   medType: 'inyectables', dosage: '10U', zone: 'abdomen', timestamp: makeDate(1, 7, 30), completed: true },
 ];
 
-const INITIAL_NOTIFICATIONS: NotificationEntry[] = [
-  { id: 'n1', title: 'Glucosa Elevada', body: 'Tu nivel fue de 162 mg/dL. Por encima del umbral de 140.', type: 'alert_high', timestamp: makeDate(4, 7, 1),  read: true },
-  { id: 'n2', title: 'Registro Guardado', body: 'Glucosa 108 mg/dL registrada correctamente.', type: 'success', timestamp: makeDate(0, 8, 31), read: false },
-  { id: 'n3', title: 'Recordatorio de Comida', body: 'Recuerda registrar tu almuerzo.', type: 'reminder', timestamp: makeDate(0, 12, 0), read: false },
+const DEMO_NOTIFICATIONS: NotificationEntry[] = [
+  { id: 'n1', title: 'Glucosa Elevada',       body: 'Tu nivel fue de 162 mg/dL.',          type: 'alert_high', timestamp: makeDate(4, 7, 1),  read: true  },
+  { id: 'n2', title: 'Registro Guardado',     body: 'Glucosa 108 mg/dL registrada.',        type: 'success',    timestamp: makeDate(0, 8, 31), read: false },
+  { id: 'n3', title: 'Recordatorio de Comida',body: 'Recuerda registrar tu almuerzo.',      type: 'reminder',   timestamp: makeDate(0, 12, 0), read: false },
 ];
+
+// Al arrancar: si hay usuario logueado cargamos vacío (se llenará con Supabase pull).
+// Si no hay usuario mostramos los datos de demo para que la UI no esté vacía.
+const hasLocalUser = !!db_getCurrentUser();
+const INITIAL_ENTRIES:        AnyEntry[]           = hasLocalUser ? [] : DEMO_ENTRIES;
+const INITIAL_NOTIFICATIONS:  NotificationEntry[]  = hasLocalUser ? [] : DEMO_NOTIFICATIONS;
 
 // ─── INITIAL TASKS ───────────────────────────────────────────────────────────
 
@@ -311,6 +336,13 @@ interface AppStoreValue {
   // Rewards
   rewards: Reward[];
   unlockedRewards: Reward[];
+
+  // Current authenticated user
+  currentUser: AppUser | null;
+  setCurrentUser: (user: AppUser | null) => void;
+  refreshCurrentUser: () => Promise<void>;
+  clearUserData: () => void;
+  loadUserData: () => Promise<void>;
 }
 
 // ─── CONTEXT ─────────────────────────────────────────────────────────────────
@@ -327,8 +359,114 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   });
   const [tasks,       setTasks]       = useState<Task[]>(INITIAL_TASKS);
   const [completions, setCompletions] = useState<TaskCompletion[]>(INITIAL_COMPLETIONS);
+  const [currentUser, setCurrentUserState] = useState<AppUser | null>(() => db_getCurrentUser());
 
-  const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  // Cargar usuario al montar (sync local) y luego refrescar desde Supabase
+  useEffect(() => {
+    refreshCurrentUser();
+  }, []);
+
+  const setCurrentUser = useCallback((user: AppUser | null) => {
+    setCurrentUserState(user);
+  }, []);
+
+  // ── Limpia TODO el estado cuando el usuario cierra sesión ─────────────────
+  const clearUserData = useCallback(() => {
+    setEntries([]);
+    setNotifications([]);
+    setTasks(INITIAL_TASKS);
+    setCompletions([]);
+    setCurrentUserState(null);
+  }, []);
+
+  // ── Carga los datos del usuario desde Supabase al hacer login ─────────────
+  const loadUserData = useCallback(async () => {
+    try {
+      const { pullFromSupabase } = await import('@/service/syncService');
+      const remote = await pullFromSupabase();
+
+      // Mapear entradas remotas al formato AnyEntry
+      const glucoseEntries: AnyEntry[] = (remote.glucose ?? []).map((r: any) => ({
+        id:         r.id,
+        type:       'glucose' as const,
+        value:      r.value,
+        source:     r.source,
+        deviceName: r.device_name ?? undefined,
+        note:       r.note ?? undefined,
+        completed:  r.completed ?? true,
+        timestamp:  new Date(r.timestamp),
+      }));
+
+      const exerciseEntries: AnyEntry[] = (remote.exercise ?? []).map((r: any) => ({
+        id:              r.id,
+        type:            'exercise' as const,
+        activity:        r.activity,
+        durationMinutes: r.duration_minutes,
+        note:            r.note ?? undefined,
+        completed:       r.completed ?? true,
+        timestamp:       new Date(r.timestamp),
+      }));
+
+      const mealEntries: AnyEntry[] = (remote.meals ?? []).map((r: any) => ({
+        id:        r.id,
+        type:      'meal' as const,
+        name:      r.name,
+        category:  r.category,
+        calories:  r.calories ?? 0,
+        carbs:     r.carbs    ?? 0,
+        protein:   r.protein  ?? 0,
+        fat:       r.fat      ?? 0,
+        imageUri:  r.image_uri ?? undefined,
+        completed: r.completed ?? true,
+        timestamp: new Date(r.timestamp),
+      }));
+
+      const medicationEntries: AnyEntry[] = (remote.medication ?? []).map((r: any) => ({
+        id:        r.id,
+        type:      'medication' as const,
+        medName:   r.med_name,
+        medType:   r.med_type,
+        dosage:    r.dosage,
+        zone:      r.zone ?? undefined,
+        completed: r.completed ?? true,
+        timestamp: new Date(r.timestamp),
+      }));
+
+      const allEntries = [
+        ...glucoseEntries,
+        ...exerciseEntries,
+        ...mealEntries,
+        ...medicationEntries,
+      ].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+
+      if (allEntries.length > 0) {
+        setEntries(allEntries);
+      }
+    } catch (e) {
+      console.warn('[AppStore] loadUserData error:', e);
+    }
+  }, []);
+
+  const refreshCurrentUser = useCallback(async () => {
+    try {
+      const user = await authGetCurrentUser();
+      if (user) {
+        setCurrentUserState(user);
+        // Al refrescar usuario, también cargamos sus datos
+        loadUserData();
+      }
+    } catch {
+      const local = db_getCurrentUser();
+      if (local) setCurrentUserState(local);
+    }
+  }, [loadUserData]);
+
+  // UUID v4 compatible con Supabase (xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx)
+  const uid = (): string =>
+    'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
 
   // ── Agregar notificación interna ──────────────────────────────────────────
   const addNotification = useCallback((n: Omit<NotificationEntry, 'id'|'timestamp'|'read'>) => {
@@ -358,43 +496,202 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [thresholds, addNotification]);
 
-  // ── ADD GLUCOSE ───────────────────────────────────────────────────────────
+  // ── ADD GLUCOSE — memoria + SQLite + Supabase ─────────────────────────────
   const addGlucoseEntry = useCallback(async (data: Omit<GlucoseEntry, 'id'|'type'|'completed'>) => {
-    const entry: GlucoseEntry = { ...data, id: uid(), type: 'glucose', completed: true };
+    const id    = uid();
+    const entry: GlucoseEntry = { ...data, id, type: 'glucose', completed: true };
+
+    // 1. Estado en memoria (UI reactivo inmediato)
     setEntries(prev => [entry, ...prev]);
-    await checkGlucoseAlerts(data.value, entry.id);
+
+    // 2. SQLite local (offline-first + encola en sync_queue)
+    try {
+      db_saveGlucose({
+        id,
+        value:      data.value,
+        source:     data.source,
+        deviceName: data.deviceName,
+        note:       data.note,
+        timestamp:  data.timestamp,
+      });
+    } catch (e) {
+      console.warn('[AppStore] db_saveGlucose error:', e);
+    }
+
+    // 3. Supabase directo (si hay conexión)
+    try {
+      const user = db_getCurrentUser();
+      if (user) {
+        await upsertGlucoseEntry({
+          id,
+          userId:     user.id,
+          value:      data.value,
+          source:     data.source,
+          deviceName: data.deviceName,
+          note:       data.note,
+          timestamp:  data.timestamp,
+        });
+        console.log('[Supabase] ✅ Glucosa guardada:', id, data.value, 'mg/dL');
+      }
+    } catch (e) {
+      console.warn('[Supabase] upsertGlucoseEntry falló (se sincronizará después):', e);
+    }
+
+    // 4. Alertas
+    await checkGlucoseAlerts(data.value, id);
   }, [checkGlucoseAlerts]);
 
-  // ── ADD EXERCISE ──────────────────────────────────────────────────────────
-  const addExerciseEntry = useCallback((data: Omit<ExerciseEntry, 'id'|'type'|'completed'>) => {
-    const entry: ExerciseEntry = { ...data, id: uid(), type: 'exercise', completed: true };
+  // ── ADD EXERCISE — memoria + SQLite + Supabase ────────────────────────────
+  const addExerciseEntry = useCallback(async (data: Omit<ExerciseEntry, 'id'|'type'|'completed'>) => {
+    const id    = uid();
+    const entry: ExerciseEntry = { ...data, id, type: 'exercise', completed: true };
+
+    // 1. Memoria
     setEntries(prev => [entry, ...prev]);
+
+    // 2. SQLite
+    try {
+      db_saveExercise({
+        id,
+        activity:        data.activity,
+        durationMinutes: data.durationMinutes,
+        note:            data.note,
+        timestamp:       data.timestamp,
+      });
+    } catch (e) {
+      console.warn('[AppStore] db_saveExercise error:', e);
+    }
+
+    // 3. Supabase
+    try {
+      const user = db_getCurrentUser();
+      if (user) {
+        await upsertExerciseEntry({
+          id,
+          userId:          user.id,
+          activity:        data.activity,
+          durationMinutes: data.durationMinutes,
+          note:            data.note,
+          timestamp:       data.timestamp,
+        });
+        console.log('[Supabase] ✅ Ejercicio guardado:', id, data.activity);
+      }
+    } catch (e) {
+      console.warn('[Supabase] upsertExerciseEntry falló:', e);
+    }
+
+    // 4. Notificación
     addNotification({
       title: '🏃 Ejercicio Registrado',
-      body: `${data.activity} · ${data.durationMinutes} min`,
-      type: 'success', relatedEntryId: entry.id,
+      body:  `${data.activity} · ${data.durationMinutes} min`,
+      type:  'success',
+      relatedEntryId: id,
     });
   }, [addNotification]);
 
-  // ── ADD MEAL ──────────────────────────────────────────────────────────────
-  const addMealEntry = useCallback((data: Omit<MealEntry, 'id'|'type'|'completed'>) => {
-    const entry: MealEntry = { ...data, id: uid(), type: 'meal', completed: true };
+  // ── ADD MEAL — memoria + SQLite + Supabase ────────────────────────────────
+  const addMealEntry = useCallback(async (data: Omit<MealEntry, 'id'|'type'|'completed'>) => {
+    const id    = uid();
+    const entry: MealEntry = { ...data, id, type: 'meal', completed: true };
+
+    // 1. Memoria
     setEntries(prev => [entry, ...prev]);
+
+    // 2. SQLite
+    try {
+      db_saveMeal({
+        id,
+        name:      data.name,
+        category:  data.category,
+        calories:  data.calories,
+        carbs:     data.carbs,
+        protein:   data.protein,
+        fat:       data.fat,
+        imageUri:  data.imageUri,
+        timestamp: data.timestamp,
+      });
+    } catch (e) {
+      console.warn('[AppStore] db_saveMeal error:', e);
+    }
+
+    // 3. Supabase
+    try {
+      const user = db_getCurrentUser();
+      if (user) {
+        await upsertMealEntry({
+          id,
+          userId:    user.id,
+          name:      data.name,
+          category:  data.category,
+          calories:  data.calories,
+          carbs:     data.carbs,
+          protein:   data.protein,
+          fat:       data.fat,
+          imageUri:  data.imageUri,
+          timestamp: data.timestamp,
+        });
+        console.log('[Supabase] ✅ Comida guardada:', id, data.name);
+      }
+    } catch (e) {
+      console.warn('[Supabase] upsertMealEntry falló:', e);
+    }
+
+    // 4. Notificación
     addNotification({
       title: '🍽️ Comida Registrada',
-      body: `${data.name} · ${data.calories} kcal`,
-      type: 'success', relatedEntryId: entry.id,
+      body:  `${data.name} · ${data.calories} kcal`,
+      type:  'success',
+      relatedEntryId: id,
     });
   }, [addNotification]);
 
-  // ── ADD MEDICATION ────────────────────────────────────────────────────────
-  const addMedicationEntry = useCallback((data: Omit<MedicationEntry, 'id'|'type'|'completed'>) => {
-    const entry: MedicationEntry = { ...data, id: uid(), type: 'medication', completed: true };
+  // ── ADD MEDICATION — memoria + SQLite + Supabase ──────────────────────────
+  const addMedicationEntry = useCallback(async (data: Omit<MedicationEntry, 'id'|'type'|'completed'>) => {
+    const id    = uid();
+    const entry: MedicationEntry = { ...data, id, type: 'medication', completed: true };
+
+    // 1. Memoria
     setEntries(prev => [entry, ...prev]);
+
+    // 2. SQLite
+    try {
+      db_saveMedication({
+        id,
+        medName:   data.medName,
+        medType:   data.medType,
+        dosage:    data.dosage,
+        zone:      data.zone,
+        timestamp: data.timestamp,
+      });
+    } catch (e) {
+      console.warn('[AppStore] db_saveMedication error:', e);
+    }
+
+    // 3. Supabase
+    try {
+      const user = db_getCurrentUser();
+      if (user) {
+        await upsertMedicationEntry({
+          id,
+          userId:    user.id,
+          medName:   data.medName,
+          medType:   data.medType,
+          dosage:    data.dosage,
+          zone:      data.zone,
+          timestamp: data.timestamp,
+        });
+        console.log('[Supabase] ✅ Medicación guardada:', id, data.medName);
+      }
+    } catch (e) {
+      console.warn('[Supabase] upsertMedicationEntry falló:', e);
+    }
+
+    // 4. Notificación
     addNotification({
       title: '💊 Medicación Registrada',
-      body: `${data.medName} · ${data.dosage}`,
-      type: 'success', relatedEntryId: entry.id,
+      body:  `${data.medName} · ${data.dosage}`,
+      type:  'success',
+      relatedEntryId: id,
     });
   }, [addNotification]);
 
@@ -403,9 +700,39 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     setEntries(prev => prev.map(e => e.id === id ? { ...e, completed: !e.completed } : e));
   }, []);
 
-  // ── DELETE ENTRY ──────────────────────────────────────────────────────────
-  const deleteEntry = useCallback((id: string) => {
+  // ── DELETE ENTRY — memoria + SQLite + Supabase ────────────────────────────
+  const deleteEntry = useCallback(async (id: string) => {
+    // 1. Memoria
     setEntries(prev => prev.filter(e => e.id !== id));
+
+    // 2. SQLite — eliminar de la tabla correspondiente
+    try {
+      const db = (await import('@/service/database')).getDb?.();
+      if (db) {
+        // Intenta borrar de las 4 tablas posibles (solo afectará la que tiene el id)
+        const tables = ['glucose_entries','exercise_entries','meal_entries','medication_entries'];
+        for (const t of tables) {
+          try { db.runSync(`DELETE FROM ${t} WHERE id = ?`, [id]); } catch {}
+        }
+      }
+    } catch (e) {
+      console.warn('[AppStore] deleteEntry SQLite error:', e);
+    }
+
+    // 3. Supabase
+    try {
+      const { supabase } = await import('@/service/supabaseClient');
+      const user = db_getCurrentUser();
+      if (user) {
+        const tables = ['glucose_entries','exercise_entries','meal_entries','medication_entries'];
+        for (const t of tables) {
+          const { error } = await supabase.from(t).delete().eq('id', id).eq('user_id', user.id);
+          if (!error) { console.log('[Supabase] ✅ Eliminado de', t, id); break; }
+        }
+      }
+    } catch (e) {
+      console.warn('[Supabase] deleteEntry error:', e);
+    }
   }, []);
 
   // ── NOTIFICATIONS ─────────────────────────────────────────────────────────
@@ -625,6 +952,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     tasks, taskCompletions: completions, addTask, deleteTask, toggleTask, completeTask,
     getTasksForFrequency, isTaskCompletedToday, getStreakForTask, getCompletionDaysThisMonth,
     streakData, rewards, unlockedRewards,
+    currentUser, setCurrentUser, refreshCurrentUser, clearUserData, loadUserData,
   }), [
     entries, glucoseEntries, exerciseEntries, mealEntries, medicationEntries, latestGlucose,
     addGlucoseEntry, addExerciseEntry, addMealEntry, addMedicationEntry,
@@ -637,6 +965,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     tasks, completions, addTask, deleteTask, toggleTask, completeTask,
     getTasksForFrequency, isTaskCompletedToday, getStreakForTask, getCompletionDaysThisMonth,
     streakData, rewards, unlockedRewards,
+    currentUser, setCurrentUser, refreshCurrentUser, clearUserData, loadUserData,
   ]);
 
   return <AppStoreContext.Provider value={value}>{children}</AppStoreContext.Provider>;
