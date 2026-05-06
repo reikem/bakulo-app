@@ -1,448 +1,494 @@
 /**
- * reports.tsx — v2 operativo
- * Reportes reales desde AppStore:
- *   - Gráfico de tendencias semanal/mensual
- *   - Estadísticas bento (promedio, TIR, hiperglucemia, carbos)
- *   - Exportación a PDF y CSV
- *   - Adjuntar archivos/fotos al reporte
- *
- * Instalación:
- *   npx expo install expo-sharing expo-file-system expo-document-picker
+ * app/reports.tsx — v4
+ * ✅ Genera PDF (HTML) y CSV con datos reales de SQLite + AppStore
+ * ✅ Detecta campos vacíos → abre MissingDataModal para completarlos
+ * ✅ Comparte por correo, WhatsApp o cualquier app del sistema
+ * ✅ Previsualización de estadísticas del mes antes de exportar
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Platform, Alert, SafeAreaView, Dimensions,
+  SafeAreaView, ActivityIndicator, Alert, Modal, Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system';
 import {
-  ArrowLeft, Bell, Download, TrendingDown, TrendingUp,
-  FileText, Share2, Calendar, CheckCircle,
+  ArrowLeft, Download, FileText, Droplets,
+  Heart, Pill, Calendar, ChevronLeft, ChevronRight,
+  Share2, Dumbbell, ClipboardList, Mail, MessageCircle,
+  X, CheckCircle2, AlertTriangle, Eye,
 } from 'lucide-react-native';
-import { useAppStore, getGlucoseRange } from '@/store/AppStore';
+import { useAppStore } from '@/store/AppStore';
+import { db_getCurrentUser } from '@/service/database';
+import { generateAndShareReport, ReportType, ReportFormat, ReportData } from '@/service/reportService';
+import { MissingDataModal } from '@/components/ui/MissingDataModal';
 
-const { width } = Dimensions.get('window');
+// ─── CONSTANTES ───────────────────────────────────────────────────────────────
+const MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+  'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
-// ─── GLUCOSE TRENDS CHART ────────────────────────────────────────────────────
-function GlucoseTrendsChart({ range, data }: {
-  range: 'Semanal' | 'Mensual';
-  data: { label: string; value: number; h: number }[];
+const C = {
+  bg:     '#0f1315',
+  card:   '#1a2022',
+  border: '#2a3335',
+  text:   '#ecf2f3',
+  sub:    '#6f787d',
+  accent: '#86d0ef',
+  primary:'#004e63',
+  green:  '#22c55e',
+  amber:  '#f59e0b',
+  red:    '#ef4444',
+  purple: '#c4b5fd',
+  orange: '#fb923c',
+};
+
+// ─── TIPO REPORT DEF ──────────────────────────────────────────────────────────
+interface ReportDef {
+  id:    ReportType;
+  label: string;
+  desc:  string;
+  icon:  React.ReactNode;
+  color: string;
+}
+
+const REPORTS: ReportDef[] = [
+  { id:'glucemia',   label:'Automonitoreo de Glicemia',   desc:'Tabla diaria de azúcar en sangre con promedios y badges',   icon:<Droplets  color={C.accent}  size={22}/>, color:C.accent  },
+  { id:'ejercicio',  label:'Actividad Física',            desc:'Sesiones de ejercicio, duración y tipo de actividad',        icon:<Dumbbell  color={C.green}   size={22}/>, color:C.green   },
+  { id:'comidas',    label:'Registro Alimentario',        desc:'Comidas con calorías, carbohidratos, proteína y grasa',      icon:<ClipboardList color={C.amber} size={22}/>, color:C.amber  },
+  { id:'medicacion', label:'Medicamentos Crónicos',       desc:'Historial de medicación con dosis y tipo por mes',           icon:<Pill      color={C.purple}  size={22}/>, color:C.purple  },
+  { id:'completo',   label:'Reporte Completo de Salud',   desc:'Todos los registros del mes en un solo documento',           icon:<FileText  color={C.orange}  size={22}/>, color:C.orange  },
+];
+
+// ─── SHARE OPTIONS MODAL ──────────────────────────────────────────────────────
+function ShareOptionsModal({ visible, reportDef, format, onSelect, onClose }: {
+  visible: boolean;
+  reportDef: ReportDef | null;
+  format: ReportFormat;
+  onSelect: (via: 'whatsapp'|'email'|'any') => void;
+  onClose: () => void;
 }) {
-  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  if (!reportDef) return null;
 
-  const barColor = (v: number) => {
-    if (v === 0)   return 'rgba(255,255,255,0.04)';
-    if (v < 70)    return '#ef4444';
-    if (v <= 140)  return '#86d0ef';
-    if (v <= 199)  return '#f59e0b';
-    return '#ef4444';
-  };
-
-  return (
-    <View style={styles.chartCard}>
-      <View style={styles.chartHeader}>
-        <View style={styles.chartTitleRow}>
-          <View style={styles.chartIndicator} />
-          <Text style={styles.chartTitle}>Tendencias de Glucosa</Text>
-        </View>
-      </View>
-
-      <View style={styles.barContainer}>
-        {data.map((item, index) => {
-          const isSelected = hoveredIndex === index;
-          const color      = barColor(item.value);
-          const hasData    = item.value > 0;
-
-          return (
-            <View key={`${range}-${index}`} style={styles.barWrapper}>
-              {isSelected && hasData && (
-                <View style={[styles.tooltip, { borderColor: color }]}>
-                  <Text style={[styles.tooltipValue, { color }]}>{item.value}</Text>
-                  <Text style={styles.tooltipUnit}>mg/dL</Text>
-                </View>
-              )}
-              <TouchableOpacity
-                activeOpacity={0.8}
-                style={styles.barTouchable}
-                {...(Platform.OS === 'web'
-                  ? { onMouseEnter: () => setHoveredIndex(index), onMouseLeave: () => setHoveredIndex(null) }
-                  : { onPressIn: () => setHoveredIndex(index), onPressOut: () => setHoveredIndex(null) }
-                )}
-              >
-                <View style={styles.barTrack}>
-                  <View style={[
-                    styles.barFill,
-                    { height: `${item.h}%`, backgroundColor: color, opacity: isSelected ? 1 : hasData ? 0.75 : 1 },
-                  ]} />
-                </View>
-              </TouchableOpacity>
-              <Text style={[styles.dayText, isSelected && { color: '#ecf2f3' }]}>
-                {item.label}
-              </Text>
-            </View>
-          );
-        })}
-      </View>
-
-      {/* Leyenda */}
-      <View style={styles.legend}>
-        {[
-          { color: '#86d0ef', label: 'Normal (70–140)' },
-          { color: '#f59e0b', label: 'Elevado'         },
-          { color: '#ef4444', label: 'Crítico'         },
-        ].map(({ color, label }) => (
-          <View key={label} style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: color }]} />
-            <Text style={styles.legendText}>{label}</Text>
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-}
-
-// ─── BENTO STATS ──────────────────────────────────────────────────────────────
-function BentoStats({ average, trend, hyperPct, inRangePct }: {
-  average: number; trend: string; hyperPct: number; inRangePct: number;
-}) {
-  const trendUp = trend.startsWith('+');
-  return (
-    <View style={styles.bentoGrid}>
-      {/* Main card */}
-      <View style={styles.mainStatCard}>
-        <Text style={styles.statLabel}>GLUCOSA PROMEDIO</Text>
-        <View style={styles.statRow}>
-          <Text style={styles.statValue}>{average}</Text>
-          <Text style={styles.statUnit}> mg/dL</Text>
-        </View>
-        <View style={styles.trendBadge}>
-          {trendUp
-            ? <TrendingUp  color="#f59e0b" size={14} />
-            : <TrendingDown color="#89d89d" size={14} />}
-          <Text style={[styles.trendText, { color: trendUp ? '#f59e0b' : '#89d89d' }]}>{trend}</Text>
-        </View>
-      </View>
-
-      {/* Mini cards */}
-      <View style={styles.statsColumn}>
-        <View style={styles.miniCard}>
-          <Text style={styles.miniLabel}>TIEMPO EN RANGO</Text>
-          <Text style={[styles.miniValue, { color: inRangePct >= 70 ? '#22c55e' : '#f59e0b' }]}>
-            {inRangePct}%
-          </Text>
-        </View>
-        <View style={[styles.miniCard, { backgroundColor: '#2a1a1a' }]}>
-          <Text style={styles.miniLabel}>HIPERGLUCEMIA</Text>
-          <Text style={[styles.miniValue, { color: hyperPct > 20 ? '#ef4444' : '#89d89d' }]}>
-            {hyperPct}%
-          </Text>
-        </View>
-      </View>
-    </View>
-  );
-}
-
-// ─── EXPORT HELPERS ───────────────────────────────────────────────────────────
-async function exportCSV(
-  entries: any[],
-  filename: string
-): Promise<void> {
-  const header = 'Fecha,Hora,Glucosa (mg/dL),Fuente,Rango\n';
-  const rows = entries.map(e => {
-    const d    = new Date(e.timestamp);
-    const date = d.toLocaleDateString();
-    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const range = getGlucoseRange(e.value).label;
-    return `${date},${time},${e.value},${e.source},${range}`;
-  }).join('\n');
-
-  const csv  = header + rows;
-  const path = FileSystem.documentDirectory + filename;
-  await FileSystem.writeAsStringAsync(path, csv, { encoding: FileSystem.EncodingType.UTF8 });
-
-  if (await Sharing.isAvailableAsync()) {
-    await Sharing.shareAsync(path, { mimeType: 'text/csv', UTI: 'public.comma-separated-values-text' });
-  }
-}
-
-async function exportTextReport(
-  entries: any[],
-  avg: number,
-  inRange: number,
-  period: string
-): Promise<void> {
-  const lines = [
-    '═══════════════════════════════════════',
-    '       REPORTE DE SALUD — SERENITY     ',
-    '═══════════════════════════════════════',
-    `Período: ${period}`,
-    `Generado: ${new Date().toLocaleDateString()}`,
-    '',
-    '── ESTADÍSTICAS ──',
-    `Glucosa promedio:  ${avg} mg/dL`,
-    `Tiempo en rango:   ${inRange}%`,
-    `Total de lecturas: ${entries.length}`,
-    '',
-    '── LECTURAS ──',
-    ...entries.slice(0, 50).map(e => {
-      const d = new Date(e.timestamp);
-      return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}  →  ${e.value} mg/dL  [${getGlucoseRange(e.value).label}]`;
-    }),
-    '',
-    '═══════════════════════════════════════',
+  const OPTIONS = [
+    { id:'email' as const,    label:'Correo electrónico', sub:'Abre tu cliente de correo',  icon:<Mail        color="#86d0ef" size={22}/>, color:'#86d0ef' },
+    { id:'whatsapp' as const, label:'WhatsApp',           sub:'Comparte con tu médico',      icon:<MessageCircle color="#22c55e" size={22}/>, color:'#22c55e' },
+    { id:'any' as const,      label:'Otras apps',         sub:'Mensajes, Drive, Telegram...', icon:<Share2      color={C.amber} size={22}/>, color:C.amber   },
   ];
 
-  const text = lines.join('\n');
-  const path = FileSystem.documentDirectory + 'reporte_serenity.txt';
-  await FileSystem.writeAsStringAsync(path, text, { encoding: FileSystem.EncodingType.UTF8 });
-
-  if (await Sharing.isAvailableAsync()) {
-    await Sharing.shareAsync(path, { mimeType: 'text/plain', UTI: 'public.plain-text' });
-  }
-}
-
-// ─── MAIN SCREEN ─────────────────────────────────────────────────────────────
-export default function ReportsScreen() {
-  const router = useRouter();
-  const { glucoseEntries, getWeeklyGlucoseData, getMonthlyGlucoseData } = useAppStore();
-
-  const [range,      setRange]      = useState<'Semanal' | 'Mensual'>('Semanal');
-  const [exporting,  setExporting]  = useState(false);
-
-  const chartData = range === 'Semanal' ? getWeeklyGlucoseData() : getMonthlyGlucoseData();
-
-  // Período de análisis: últimos 30 días
-  const periodEntries = useMemo(() => {
-    const cutoff = new Date(Date.now() - 30 * 24 * 3600 * 1000);
-    return glucoseEntries.filter(e => e.timestamp >= cutoff);
-  }, [glucoseEntries]);
-
-  const avg = useMemo(() =>
-    periodEntries.length
-      ? Math.round(periodEntries.reduce((s, e) => s + e.value, 0) / periodEntries.length)
-      : 0,
-    [periodEntries]
-  );
-
-  const inRangePct = useMemo(() =>
-    periodEntries.length
-      ? Math.round((periodEntries.filter(e => e.value >= 70 && e.value <= 140).length / periodEntries.length) * 100)
-      : 0,
-    [periodEntries]
-  );
-
-  const hyperPct = useMemo(() =>
-    periodEntries.length
-      ? Math.round((periodEntries.filter(e => e.value > 180).length / periodEntries.length) * 100)
-      : 0,
-    [periodEntries]
-  );
-
-  // Comparativa vs período anterior
-  const prevPeriodEntries = useMemo(() => {
-    const from = new Date(Date.now() - 60 * 24 * 3600 * 1000);
-    const to   = new Date(Date.now() - 30 * 24 * 3600 * 1000);
-    return glucoseEntries.filter(e => e.timestamp >= from && e.timestamp < to);
-  }, [glucoseEntries]);
-
-  const prevAvg = prevPeriodEntries.length
-    ? Math.round(prevPeriodEntries.reduce((s, e) => s + e.value, 0) / prevPeriodEntries.length)
-    : avg;
-  const diff    = avg - prevAvg;
-  const trend   = diff >= 0 ? `+${diff}%` : `${diff}%`;
-
-  const handleExportCSV = async () => {
-    if (periodEntries.length === 0) { Alert.alert('Sin datos', 'No hay registros en este período.'); return; }
-    setExporting(true);
-    try {
-      await exportCSV(periodEntries, `glucosa_${Date.now()}.csv`);
-    } catch (e) {
-      Alert.alert('Error', 'No se pudo exportar el archivo.');
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  const handleExportReport = async () => {
-    if (periodEntries.length === 0) { Alert.alert('Sin datos', 'No hay registros.'); return; }
-    setExporting(true);
-    try {
-      await exportTextReport(periodEntries, avg, inRangePct, 'Últimos 30 días');
-    } catch {
-      Alert.alert('Error', 'No se pudo generar el reporte.');
-    } finally {
-      setExporting(false);
-    }
-  };
-
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <ArrowLeft color="#c4ebe0" size={24} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Reportes</Text>
-        <View style={{ width: 40 }} />
-      </View>
-
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* Título */}
-        <Text style={styles.mainTitle}>Análisis de Salud</Text>
-        <Text style={styles.subTitle}>ÚLTIMOS 30 DÍAS · {periodEntries.length} LECTURAS</Text>
-
-        {/* Toggle de período */}
-        <View style={styles.toggleContainer}>
-          {(['Semanal', 'Mensual'] as const).map(r => (
-            <TouchableOpacity
-              key={r}
-              style={[styles.toggleBtn, range === r && styles.toggleBtnActive]}
-              onPress={() => setRange(r)}
-            >
-              <Text style={[styles.toggleText, range === r && styles.toggleTextActive]}>{r}</Text>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={so.overlay}>
+        <View style={so.sheet}>
+          <View style={so.handle}/>
+          <View style={so.header}>
+            <View>
+              <Text style={so.title}>Compartir Reporte</Text>
+              <Text style={so.sub}>{reportDef.label} · {format.toUpperCase()}</Text>
+            </View>
+            <TouchableOpacity onPress={onClose} style={so.closeBtn}>
+              <X color={C.sub} size={18}/>
+            </TouchableOpacity>
+          </View>
+          {OPTIONS.map(opt => (
+            <TouchableOpacity key={opt.id} style={so.optRow} onPress={() => onSelect(opt.id)}>
+              <View style={[so.optIcon, { backgroundColor:`${opt.color}15` }]}>
+                {opt.icon}
+              </View>
+              <View style={{ flex:1 }}>
+                <Text style={so.optLabel}>{opt.label}</Text>
+                <Text style={so.optSub}>{opt.sub}</Text>
+              </View>
+              <ChevronRight color={C.sub} size={16}/>
             </TouchableOpacity>
           ))}
+          <View style={{ height:24 }}/>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const so = StyleSheet.create({
+  overlay:  { flex:1, backgroundColor:'rgba(0,0,0,0.7)', justifyContent:'flex-end' },
+  sheet:    { backgroundColor:'#1a2022', borderTopLeftRadius:28, borderTopRightRadius:28, paddingHorizontal:20, paddingTop:12 },
+  handle:   { width:36, height:4, backgroundColor:'rgba(255,255,255,0.1)', borderRadius:2, alignSelf:'center', marginBottom:16 },
+  header:   { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:20 },
+  title:    { color:C.text, fontSize:18, fontWeight:'800' },
+  sub:      { color:C.sub, fontSize:12, marginTop:2 },
+  closeBtn: { padding:8, backgroundColor:'rgba(255,255,255,0.05)', borderRadius:10 },
+  optRow:   { flexDirection:'row', alignItems:'center', gap:14, paddingVertical:14, borderBottomWidth:StyleSheet.hairlineWidth, borderBottomColor:C.border },
+  optIcon:  { width:46, height:46, borderRadius:14, alignItems:'center', justifyContent:'center' },
+  optLabel: { color:C.text, fontSize:14, fontWeight:'700' },
+  optSub:   { color:C.sub, fontSize:11, marginTop:2 },
+});
+
+// ─── STAT CHIP ────────────────────────────────────────────────────────────────
+function StatChip({ label, value, color }: { label:string; value:string|number; color:string }) {
+  return (
+    <View style={sc.chip}>
+      <Text style={[sc.val, { color }]}>{value}</Text>
+      <Text style={sc.lbl}>{label}</Text>
+    </View>
+  );
+}
+const sc = StyleSheet.create({
+  chip: { flex:1, backgroundColor:C.card, borderRadius:14, padding:10, alignItems:'center', borderWidth:1, borderColor:C.border },
+  val:  { fontSize:15, fontWeight:'800', marginBottom:2 },
+  lbl:  { color:C.sub, fontSize:9, fontWeight:'700', textAlign:'center' },
+});
+
+// ─── MISSING INDICATOR ────────────────────────────────────────────────────────
+function MissingIndicator({ count, onPress }: { count:number; onPress:()=>void }) {
+  if (count === 0) return null;
+  return (
+    <TouchableOpacity style={mi.box} onPress={onPress}>
+      <AlertTriangle color={C.amber} size={16}/>
+      <Text style={mi.text}>{count} categoría(s) sin datos este mes</Text>
+      <Text style={mi.link}>Completar →</Text>
+    </TouchableOpacity>
+  );
+}
+const mi = StyleSheet.create({
+  box:  { flexDirection:'row', alignItems:'center', gap:8, backgroundColor:'rgba(245,158,11,0.08)', borderRadius:14, padding:12, marginBottom:16, borderWidth:1, borderColor:'rgba(245,158,11,0.2)', flexWrap:'wrap' },
+  text: { color:C.amber, fontSize:12, flex:1, flexWrap:'wrap' },
+  link: { color:C.amber, fontSize:12, fontWeight:'800' },
+});
+
+// ─── REPORT CARD ──────────────────────────────────────────────────────────────
+function ReportCard({
+  rep, downloading, onDownload, onShare
+}: {
+  rep: ReportDef;
+  downloading: boolean;
+  onDownload: (format: ReportFormat) => void;
+  onShare:    (format: ReportFormat) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <View style={rca.card}>
+      <TouchableOpacity style={rca.header} onPress={() => setExpanded(v=>!v)} activeOpacity={0.8}>
+        <View style={[rca.iconBox, { backgroundColor:`${rep.color}15` }]}>
+          {rep.icon}
+        </View>
+        <View style={rca.info}>
+          <Text style={rca.label}>{rep.label}</Text>
+          <Text style={rca.desc}>{rep.desc}</Text>
+        </View>
+        <View style={[rca.expandArrow, expanded && { transform:[{rotate:'90deg'}] }]}>
+          <ChevronRight color={C.sub} size={18}/>
+        </View>
+      </TouchableOpacity>
+
+      {expanded && (
+        <View style={rca.actions}>
+          {/* PDF */}
+          <View style={rca.formatRow}>
+            <View style={rca.formatBadge}>
+              <Text style={rca.formatLabel}>📄 PDF</Text>
+            </View>
+            <TouchableOpacity
+              style={[rca.actionBtn, { borderColor: rep.color }]}
+              onPress={() => onDownload('pdf')}
+              disabled={downloading}
+            >
+              {downloading
+                ? <ActivityIndicator color={rep.color} size="small"/>
+                : <><Download color={rep.color} size={15}/><Text style={[rca.actionBtnText,{color:rep.color}]}>Guardar</Text></>}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[rca.actionBtn, { borderColor: rep.color }]}
+              onPress={() => onShare('pdf')}
+              disabled={downloading}
+            >
+              <Share2 color={rep.color} size={15}/>
+              <Text style={[rca.actionBtnText,{color:rep.color}]}>Compartir</Text>
+            </TouchableOpacity>
+          </View>
+          {/* CSV */}
+          <View style={rca.formatRow}>
+            <View style={[rca.formatBadge, {backgroundColor:'rgba(34,197,94,0.1)'}]}>
+              <Text style={[rca.formatLabel,{color:C.green}]}>📊 CSV</Text>
+            </View>
+            <TouchableOpacity
+              style={[rca.actionBtn, { borderColor: C.green }]}
+              onPress={() => onDownload('csv')}
+              disabled={downloading}
+            >
+              {downloading
+                ? <ActivityIndicator color={C.green} size="small"/>
+                : <><Download color={C.green} size={15}/><Text style={[rca.actionBtnText,{color:C.green}]}>Guardar</Text></>}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[rca.actionBtn, { borderColor: C.green }]}
+              onPress={() => onShare('csv')}
+              disabled={downloading}
+            >
+              <Share2 color={C.green} size={15}/>
+              <Text style={[rca.actionBtnText,{color:C.green}]}>Compartir</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
+const rca = StyleSheet.create({
+  card:           { backgroundColor:C.card, borderRadius:20, marginBottom:10, overflow:'hidden', borderWidth:1, borderColor:C.border },
+  header:         { flexDirection:'row', alignItems:'center', padding:16, gap:12 },
+  iconBox:        { width:46, height:46, borderRadius:14, alignItems:'center', justifyContent:'center' },
+  info:           { flex:1 },
+  label:          { color:C.text, fontSize:14, fontWeight:'700', marginBottom:3 },
+  desc:           { color:C.sub, fontSize:11, lineHeight:16 },
+  expandArrow:    { padding:4 },
+  actions:        { paddingHorizontal:16, paddingBottom:16, gap:10, borderTopWidth:StyleSheet.hairlineWidth, borderTopColor:C.border, paddingTop:12 },
+  formatRow:      { flexDirection:'row', alignItems:'center', gap:8 },
+  formatBadge:    { backgroundColor:'rgba(134,208,239,0.1)', paddingHorizontal:10, paddingVertical:5, borderRadius:100 },
+  formatLabel:    { color:C.accent, fontSize:11, fontWeight:'800' },
+  actionBtn:      { flexDirection:'row', alignItems:'center', gap:5, borderWidth:1, paddingHorizontal:12, paddingVertical:7, borderRadius:100 },
+  actionBtnText:  { fontSize:12, fontWeight:'700' },
+});
+
+// ─── MAIN SCREEN ──────────────────────────────────────────────────────────────
+export default function ReportsScreen() {
+  const router = useRouter();
+  const { glucoseEntries, exerciseEntries, mealEntries, medicationEntries, documentEntries } = useAppStore();
+  const user = db_getCurrentUser();
+  const userName = user?.displayName ?? 'Usuario';
+
+  const now = new Date();
+  const [selectedMonth, setSelectedMonth] = useState(now.getMonth());
+  const [selectedYear,  setSelectedYear]  = useState(now.getFullYear());
+  const [downloading,   setDownloading]   = useState<string|null>(null);
+
+  // Modales
+  const [shareModal,    setShareModal]    = useState<{ rep:ReportDef; format:ReportFormat }|null>(null);
+  const [missingModal,  setMissingModal]  = useState(false);
+  // Contexto de la acción pendiente (para ejecutar después de completar datos)
+  const [pendingAction, setPendingAction] = useState<(()=>void)|null>(null);
+
+  // ── Estadísticas del mes ───────────────────────────────────────────────────
+  const monthStats = useMemo(() => {
+    const inMonth = (e:any) => {
+      const d = new Date(e.timestamp ?? e.uploaded_at);
+      return d.getMonth()===selectedMonth && d.getFullYear()===selectedYear;
+    };
+    const gE = glucoseEntries.filter(inMonth);
+    const avg = gE.length ? Math.round(gE.reduce((s,e)=>s+e.value,0)/gE.length) : 0;
+    const tir = gE.length ? Math.round(gE.filter(e=>e.value>=70&&e.value<=180).length/gE.length*100) : 0;
+    return {
+      glucose:  gE.length,
+      avgGlu:   avg,
+      tir,
+      exercise: exerciseEntries.filter(inMonth).length,
+      meals:    mealEntries.filter(inMonth).length,
+      meds:     medicationEntries.filter(inMonth).length,
+    };
+  }, [glucoseEntries,exerciseEntries,mealEntries,medicationEntries,selectedMonth,selectedYear]);
+
+  // ── Missing fields ─────────────────────────────────────────────────────────
+  const missingFields = useMemo(() => {
+    const f: string[] = [];
+    if (monthStats.glucose === 0)  f.push('Lecturas de glucosa');
+    if (monthStats.exercise === 0) f.push('Registro de ejercicio');
+    if (monthStats.meals === 0)    f.push('Registro de comidas');
+    if (monthStats.meds === 0)     f.push('Registro de medicación');
+    return f;
+  }, [monthStats]);
+
+  // ── Construir ReportData ───────────────────────────────────────────────────
+  const buildData = useCallback((): ReportData => ({
+    userName,
+    month:            selectedMonth,
+    year:             selectedYear,
+    glucoseEntries:   glucoseEntries as any[],
+    exerciseEntries:  exerciseEntries as any[],
+    mealEntries:      mealEntries as any[],
+    medicationEntries:medicationEntries as any[],
+    documentEntries:  documentEntries as any[],
+  }), [userName,selectedMonth,selectedYear,glucoseEntries,exerciseEntries,mealEntries,medicationEntries,documentEntries]);
+
+  // ── Ejecutar descarga/compartir ────────────────────────────────────────────
+  const executeReport = useCallback(async (
+    rep:    ReportDef,
+    format: ReportFormat,
+    via?:   'whatsapp'|'email'|'any'
+  ) => {
+    const key = `${rep.id}-${format}${via?'-'+via:''}`;
+    setDownloading(key);
+    try {
+      const result = await generateAndShareReport(rep.id, format, buildData(), via);
+      if (result.missingFields.length > 0 && !via) {
+        // Si hay datos faltantes y es la primera vez → informar
+        Alert.alert(
+          '⚠️ Datos incompletos',
+          `El reporte se generó, pero le faltan datos:\n• ${result.missingFields.join('\n• ')}\n\nPuedes completarlos para mejorar el reporte.`,
+          [{ text:'OK' }]
+        );
+      }
+    } catch (e:any) {
+      Alert.alert('Error al generar reporte', e?.message ?? 'Intenta de nuevo');
+    } finally {
+      setDownloading(null);
+    }
+  }, [buildData]);
+
+  // ── Handlers de botones ───────────────────────────────────────────────────
+  const handleDownload = useCallback((rep: ReportDef, format: ReportFormat) => {
+    // Si hay datos faltantes → preguntar si completar primero
+    if (missingFields.length > 0) {
+      Alert.alert(
+        '⚠️ Datos faltantes',
+        `Faltan ${missingFields.length} categoría(s) sin registros este mes.\n¿Deseas completarlos antes de generar el reporte?`,
+        [
+          { text:'Completar datos', onPress:() => {
+            setPendingAction(() => () => executeReport(rep, format));
+            setMissingModal(true);
+          }},
+          { text:'Generar igual', style:'default', onPress:() => executeReport(rep, format) },
+          { text:'Cancelar', style:'cancel' },
+        ]
+      );
+    } else {
+      executeReport(rep, format);
+    }
+  }, [missingFields, executeReport]);
+
+  const handleShare = useCallback((rep: ReportDef, format: ReportFormat) => {
+    setShareModal({ rep, format });
+  }, []);
+
+  const handleShareVia = useCallback(async (via: 'whatsapp'|'email'|'any') => {
+    if (!shareModal) return;
+    setShareModal(null);
+    await executeReport(shareModal.rep, shareModal.format, via);
+  }, [shareModal, executeReport]);
+
+  // ── Navegación de mes ──────────────────────────────────────────────────────
+  const prevMonth = () => {
+    if (selectedMonth === 0) { setSelectedMonth(11); setSelectedYear(y=>y-1); }
+    else setSelectedMonth(m=>m-1);
+  };
+  const nextMonth = () => {
+    if (selectedMonth === 11) { setSelectedMonth(0); setSelectedYear(y=>y+1); }
+    else setSelectedMonth(m=>m+1);
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
+  return (
+    <SafeAreaView style={s.container}>
+      {/* Header */}
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
+          <ArrowLeft color={C.text} size={22}/>
+        </TouchableOpacity>
+        <Text style={s.headerTitle}>Reportes</Text>
+        <View style={{ width:38 }}/>
+      </View>
+
+      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+
+        {/* Selector de mes */}
+        <View style={s.monthSelector}>
+          <TouchableOpacity onPress={prevMonth} style={s.monthBtn}>
+            <ChevronLeft color={C.accent} size={24}/>
+          </TouchableOpacity>
+          <View style={s.monthCenter}>
+            <Text style={s.monthText}>{MONTHS[selectedMonth]}</Text>
+            <Text style={s.yearText}>{selectedYear}</Text>
+          </View>
+          <TouchableOpacity onPress={nextMonth} style={s.monthBtn}>
+            <ChevronRight color={C.accent} size={24}/>
+          </TouchableOpacity>
         </View>
 
-        {/* Bento Stats */}
-        <BentoStats
-          average={avg}
-          trend={trend}
-          hyperPct={hyperPct}
-          inRangePct={inRangePct}
+        {/* Estadísticas del mes */}
+        <View style={s.statsRow}>
+          <StatChip label="GLUCEMIAS"  value={monthStats.glucose}  color={C.accent}/>
+          <StatChip label="PROM mg/dL" value={monthStats.avgGlu || '—'} color={monthStats.avgGlu>180?C.red:monthStats.avgGlu>0?C.green:C.sub}/>
+          <StatChip label="TIR"        value={`${monthStats.tir}%`} color={monthStats.tir>=70?C.green:C.amber}/>
+          <StatChip label="MEDICAC."   value={monthStats.meds}     color={C.purple}/>
+        </View>
+        <View style={[s.statsRow, { marginTop:8 }]}>
+          <StatChip label="EJERCICIOS" value={monthStats.exercise} color={C.green}/>
+          <StatChip label="COMIDAS"    value={monthStats.meals}    color={C.amber}/>
+        </View>
+
+        {/* Alerta datos faltantes */}
+        <MissingIndicator
+          count={missingFields.length}
+          onPress={() => { setPendingAction(null); setMissingModal(true); }}
         />
 
-        {/* Gráfico */}
-        <GlucoseTrendsChart range={range} data={chartData} />
+        {/* Sección reportes */}
+        <Text style={s.sectionTitle}>📋 Exportar Reporte</Text>
+        <Text style={s.sectionSub}>
+          Genera en PDF (ideal para médicos) o CSV (para Excel/Sheets).
+          Comparte por correo o WhatsApp directamente.
+        </Text>
 
-        {/* Resumen clínico */}
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryHeader}>
-            <Calendar color="#86d0ef" size={18} />
-            <Text style={styles.summaryTitle}>Resumen Clínico</Text>
-          </View>
-          {[
-            { label: 'Lecturas totales',   value: `${periodEntries.length}` },
-            { label: 'Valor más alto',     value: `${periodEntries.length ? Math.max(...periodEntries.map(e => e.value)) : '—'} mg/dL` },
-            { label: 'Valor más bajo',     value: `${periodEntries.length ? Math.min(...periodEntries.map(e => e.value)) : '—'} mg/dL` },
-            { label: 'Días con registro',  value: `${new Set(periodEntries.map(e => e.timestamp.toDateString())).size}` },
-            { label: 'Hipoglucemias',      value: `${periodEntries.filter(e => e.value < 70).length} eventos` },
-          ].map(({ label, value }) => (
-            <View key={label} style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>{label}</Text>
-              <Text style={styles.summaryValue}>{value}</Text>
-            </View>
-          ))}
+        {REPORTS.map(rep => (
+          <ReportCard
+            key={rep.id}
+            rep={rep}
+            downloading={!!downloading?.startsWith(rep.id)}
+            onDownload={(fmt) => handleDownload(rep, fmt)}
+            onShare={(fmt)    => handleShare(rep, fmt)}
+          />
+        ))}
+
+        <View style={s.footer}>
+          <Text style={s.footerText}>
+            Los reportes se generan con los datos de tu teléfono (SQLite local).
+            Para datos en la nube asegúrate de sincronizar primero.
+          </Text>
         </View>
 
-        {/* Exportar */}
-        <Text style={styles.exportTitle}>Exportar Datos</Text>
-        <View style={styles.exportBtns}>
-          <TouchableOpacity
-            style={[styles.exportBtn, exporting && { opacity: 0.5 }]}
-            onPress={handleExportCSV}
-            disabled={exporting}
-          >
-            <Download color="#c4ebe0" size={18} />
-            <View>
-              <Text style={styles.exportBtnTitle}>Exportar CSV</Text>
-              <Text style={styles.exportBtnSub}>Tabla de datos completa</Text>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.exportBtn, exporting && { opacity: 0.5 }]}
-            onPress={handleExportReport}
-            disabled={exporting}
-          >
-            <FileText color="#86d0ef" size={18} />
-            <View>
-              <Text style={styles.exportBtnTitle}>Reporte Texto</Text>
-              <Text style={styles.exportBtnSub}>Resumen para compartir</Text>
-            </View>
-          </TouchableOpacity>
-        </View>
-
-        {periodEntries.length === 0 && (
-          <View style={styles.emptyBox}>
-            <CheckCircle color="#333b3d" size={28} />
-            <Text style={styles.emptyText}>Sin datos en este período</Text>
-            <Text style={styles.emptySub}>Registra lecturas de glucosa para ver reportes</Text>
-          </View>
-        )}
-
-        <View style={{ height: 60 }} />
+        <View style={{ height:60 }}/>
       </ScrollView>
+
+      {/* Modal de compartir */}
+      <ShareOptionsModal
+        visible={!!shareModal}
+        reportDef={shareModal?.rep ?? null}
+        format={shareModal?.format ?? 'pdf'}
+        onSelect={handleShareVia}
+        onClose={() => setShareModal(null)}
+      />
+
+      {/* Modal de datos faltantes */}
+      <MissingDataModal
+        visible={missingModal}
+        missingFields={missingFields}
+        month={selectedMonth}
+        year={selectedYear}
+        onClose={() => { setMissingModal(false); setPendingAction(null); }}
+        onDone={() => {
+          setMissingModal(false);
+          // Si había una acción pendiente → ejecutarla
+          if (pendingAction) { pendingAction(); setPendingAction(null); }
+        }}
+      />
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container:        { flex: 1, backgroundColor: '#121212' },
-  header:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 14 },
-  backBtn:          { padding: 10, backgroundColor: '#1a1a1a', borderRadius: 12 },
-  headerTitle:      { color: '#ecf2f3', fontSize: 16, fontWeight: '700' },
-  scroll:           { paddingHorizontal: 20 },
-  mainTitle:        { color: '#baeaff', fontSize: 30, fontWeight: '800', marginBottom: 2 },
-  subTitle:         { color: '#6f787d', fontSize: 10, letterSpacing: 1.5, fontWeight: '700', marginBottom: 20 },
-  toggleContainer:  { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 14, padding: 4, marginBottom: 20, gap: 4 },
-  toggleBtn:        { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
-  toggleBtnActive:  { backgroundColor: '#006782' },
-  toggleText:       { color: '#6f787d', fontSize: 13, fontWeight: '700' },
-  toggleTextActive: { color: 'white' },
-
-  // Bento
-  bentoGrid:       { flexDirection: 'row', gap: 12, marginBottom: 20 },
-  mainStatCard:    { flex: 1.3, backgroundColor: '#004e63', borderRadius: 24, padding: 18, justifyContent: 'center' },
-  statLabel:       { color: 'rgba(255,255,255,0.6)', fontSize: 9, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 },
-  statRow:         { flexDirection: 'row', alignItems: 'baseline', gap: 2, marginBottom: 8 },
-  statValue:       { color: '#fff', fontSize: 36, fontWeight: '800' },
-  statUnit:        { color: 'rgba(255,255,255,0.6)', fontSize: 13 },
-  trendBadge:      { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 100, alignSelf: 'flex-start' },
-  trendText:       { fontSize: 11, fontWeight: '700' },
-  statsColumn:     { flex: 0.85, gap: 12 },
-  miniCard:        { flex: 1, backgroundColor: '#1a1a1a', borderRadius: 20, padding: 14, justifyContent: 'space-between' },
-  miniLabel:       { color: '#6f787d', fontSize: 9, fontWeight: '800', letterSpacing: 0.8, textTransform: 'uppercase' },
-  miniValue:       { fontSize: 22, fontWeight: '800' },
-
-  // Chart
-  chartCard:       { backgroundColor: '#1a1a1a', borderRadius: 28, padding: 20, paddingTop: 16, marginBottom: 20 },
-  chartHeader:     { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 },
-  chartTitleRow:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  chartIndicator:  { width: 3, height: 18, backgroundColor: '#86d0ef', borderRadius: 2 },
-  chartTitle:      { color: '#f5f5f5', fontSize: 15, fontWeight: '700' },
-  barContainer:    { height: 110, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 8 },
-  barWrapper:      { flex: 1, alignItems: 'center', height: '100%', justifyContent: 'flex-end', position: 'relative' },
-  barTouchable:    { width: '65%', height: '85%', justifyContent: 'flex-end' },
-  barTrack:        { flex: 1, justifyContent: 'flex-end' },
-  barFill:         { width: '100%', borderRadius: 6 },
-  dayText:         { color: '#6f787d', fontSize: 9, fontWeight: '700', marginTop: 5 },
-  tooltip:         { position: 'absolute', top: -42, backgroundColor: '#1d2426', borderWidth: 1, borderRadius: 8, paddingHorizontal: 5, paddingVertical: 3, alignItems: 'center', zIndex: 10, minWidth: 34 },
-  tooltipValue:    { fontSize: 11, fontWeight: '800' },
-  tooltipUnit:     { color: '#6f787d', fontSize: 8 },
-  legend:          { flexDirection: 'row', gap: 12, flexWrap: 'wrap', marginTop: 6 },
-  legendItem:      { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  legendDot:       { width: 6, height: 6, borderRadius: 3 },
-  legendText:      { color: '#6f787d', fontSize: 10 },
-
-  // Summary
-  summaryCard:     { backgroundColor: '#1a1a1a', borderRadius: 24, padding: 20, marginBottom: 20 },
-  summaryHeader:   { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
-  summaryTitle:    { color: '#ecf2f3', fontSize: 16, fontWeight: '700' },
-  summaryRow:      { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.06)' },
-  summaryLabel:    { color: '#6f787d', fontSize: 13 },
-  summaryValue:    { color: '#ecf2f3', fontSize: 13, fontWeight: '700' },
-
-  // Export
-  exportTitle:     { color: '#ecf2f3', fontSize: 16, fontWeight: '700', marginBottom: 12 },
-  exportBtns:      { gap: 10, marginBottom: 20 },
-  exportBtn:       { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#1a1a1a', borderRadius: 18, padding: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
-  exportBtnTitle:  { color: '#ecf2f3', fontSize: 14, fontWeight: '700' },
-  exportBtnSub:    { color: '#6f787d', fontSize: 11, marginTop: 1 },
-  emptyBox:        { alignItems: 'center', paddingVertical: 32, gap: 8 },
-  emptyText:       { color: '#ecf2f3', fontSize: 14, fontWeight: '700' },
-  emptySub:        { color: '#6f787d', fontSize: 12 },
+// ─── STYLES ───────────────────────────────────────────────────────────────────
+const s = StyleSheet.create({
+  container:    { flex:1, backgroundColor:C.bg },
+  header:       { flexDirection:'row', alignItems:'center', paddingHorizontal:16, paddingTop:16, paddingBottom:12 },
+  backBtn:      { width:38, height:38, borderRadius:12, backgroundColor:'rgba(255,255,255,0.05)', justifyContent:'center', alignItems:'center' },
+  headerTitle:  { flex:1, color:C.text, fontSize:20, fontWeight:'800', textAlign:'center' },
+  scroll:       { paddingHorizontal:16, paddingTop:8 },
+  monthSelector:{ flexDirection:'row', alignItems:'center', backgroundColor:C.card, borderRadius:20, padding:4, marginBottom:16, borderWidth:1, borderColor:C.border },
+  monthBtn:     { width:46, height:46, justifyContent:'center', alignItems:'center' },
+  monthCenter:  { flex:1, alignItems:'center' },
+  monthText:    { color:C.text, fontSize:22, fontWeight:'800' },
+  yearText:     { color:C.sub, fontSize:12, marginTop:2 },
+  statsRow:     { flexDirection:'row', gap:8, marginBottom:4 },
+  sectionTitle: { color:C.text, fontSize:17, fontWeight:'800', marginTop:20, marginBottom:6 },
+  sectionSub:   { color:C.sub, fontSize:12, lineHeight:18, marginBottom:14 },
+  footer:       { backgroundColor:'rgba(255,255,255,0.03)', borderRadius:14, padding:14, marginTop:8 },
+  footerText:   { color:C.sub, fontSize:11, lineHeight:17, textAlign:'center' },
 });

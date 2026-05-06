@@ -61,6 +61,31 @@ export const supabase: SupabaseClient = createClient(
   }
 );
 
+// ─── LIMPIAR STORAGE SUPABASE ─────────────────────────────────────────────────
+async function clearSupabaseStorage(): Promise<void> {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const supabaseKeys = keys.filter(k =>
+      k.includes('supabase') || k.includes('sb-') || k.includes('auth-token')
+    );
+    if (supabaseKeys.length > 0) {
+      await AsyncStorage.multiRemove(supabaseKeys);
+    }
+  } catch {}
+}
+
+// ─── CALLBACK PARA REDIRECT AL LOGIN ─────────────────────────────────────────
+let _onInvalidToken: (() => void) | null = null;
+export function setInvalidTokenCallback(cb: () => void) { _onInvalidToken = cb; }
+export function removeInvalidTokenCallback() { _onInvalidToken = null; }
+
+// ─── AUTO-CLEAR SESIÓN INVÁLIDA ───────────────────────────────────────────────
+supabase.auth.onAuthStateChange(async (event) => {
+  if (event === 'SIGNED_OUT') {
+    await clearSupabaseStorage();
+  }
+});
+
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 export async function getSupabaseUserId(): Promise<string | null> {
   try {
@@ -535,4 +560,18 @@ export async function insertSosAlert(alert: {
   });
   if (error) { console.warn('[Supabase] insertSosAlert:', error.message); return false; }
   return true;
+}
+// ─── LIMPIAR SESIÓN MANUALMENTE ───────────────────────────────────────────────
+// Llama esto desde cualquier pantalla cuando detectes el error de refresh token.
+// Ejemplo de uso en un componente:
+//   import { forceSignOut } from '@/service/supabaseClient';
+//   await forceSignOut();
+//   router.replace('/login');
+export async function forceSignOut(): Promise<void> {
+  try { await supabase.auth.signOut(); } catch {}
+  await clearSupabaseStorage();
+  try {
+    const { db_logout } = require('@/service/database');
+    db_logout();
+  } catch {}
 }
