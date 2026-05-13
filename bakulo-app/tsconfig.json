@@ -5,7 +5,7 @@
     "paths": {
       "@/*": [
         "./*"
-      ]
+      ], "react-native-safe-area-context": ["./node_modules/react-native-safe-area-context"]
     }
   },
   "include": [
