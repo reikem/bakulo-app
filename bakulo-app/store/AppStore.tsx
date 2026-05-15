@@ -242,7 +242,10 @@ const DEMO_NOTIFICATIONS: NotificationEntry[] = [
 
 // Al arrancar: si hay usuario logueado cargamos vacío (se llenará con Supabase pull).
 // Si no hay usuario mostramos los datos de demo para que la UI no esté vacía.
-const hasLocalUser = !!db_getCurrentUser();
+// FIX: db_getCurrentUser() puede fallar si initDatabase() aún no corrió.
+// Envolvemos en try/catch para que el módulo cargue sin errores.
+let hasLocalUser = false;
+try { hasLocalUser = !!db_getCurrentUser(); } catch { hasLocalUser = false; }
 const INITIAL_ENTRIES:        AnyEntry[]           = hasLocalUser ? [] : DEMO_ENTRIES;
 const INITIAL_NOTIFICATIONS:  NotificationEntry[]  = hasLocalUser ? [] : DEMO_NOTIFICATIONS;
 
@@ -359,7 +362,10 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   });
   const [tasks,       setTasks]       = useState<Task[]>(INITIAL_TASKS);
   const [completions, setCompletions] = useState<TaskCompletion[]>(INITIAL_COMPLETIONS);
-  const [currentUser, setCurrentUserState] = useState<AppUser | null>(() => db_getCurrentUser());
+  const [currentUser, setCurrentUserState] = useState<AppUser | null>(() => {
+    // CRÍTICO: initDatabase() puede no haber corrido aún → proteger con try/catch
+    try { return db_getCurrentUser(); } catch { return null; }
+  });
 
   // Cargar usuario al montar (sync local) y luego refrescar desde Supabase
   useEffect(() => {
@@ -456,8 +462,10 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
         loadUserData();
       }
     } catch {
-      const local = db_getCurrentUser();
-      if (local) setCurrentUserState(local);
+      try {
+        const local = db_getCurrentUser();
+        if (local) setCurrentUserState(local);
+      } catch { /* DB aún no inicializada — ignorar */ }
     }
   }, [loadUserData]);
 
