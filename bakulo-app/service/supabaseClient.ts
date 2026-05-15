@@ -60,6 +60,77 @@ function notifyInvalidToken() {
   });
 }
 
+// Añadir a supabaseClient.ts o un servicio de preferencias
+export async function db_setUserAIKeys(userId: string, provider: 'gemini' | 'claude', apiKey: string) {
+  const { error } = await supabase
+    .from('user_preferences')
+    .upsert({ 
+      user_id: userId, 
+      ai_provider: provider, 
+      ai_api_key: apiKey 
+    });
+  return !error;
+}
+
+export async function supaSignInWithGoogle() {
+  try {
+    // Esto genera la URL de retorno dinámica para Expo Go o producción
+    const redirectUrl = Linking.createURL('/login'); 
+    
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: redirectUrl,
+        queryParams: {
+          prompt: 'select_account',
+        },
+      },
+    });
+
+    if (error) throw error;
+
+    if (data?.url) {
+      // Abre el navegador para que el usuario se autentique
+      const supported = await Linking.canOpenURL(data.url);
+      if (supported) {
+        await Linking.openURL(data.url);
+      }
+    }
+    
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error en Google Auth:', error.message);
+    return { success: false, error: error.message };
+  }
+}
+export async function supaSignInWithApple() {
+  try {
+    const redirectUrl = Linking.createURL('/login');
+    
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'apple',
+      options: {
+        redirectTo: redirectUrl,
+      },
+    });
+
+    if (error) throw error;
+    
+    if (data?.url) {
+      const supported = await Linking.canOpenURL(data.url);
+      if (supported) {
+        await Linking.openURL(data.url);
+      }
+    }
+    
+    return { success: true };
+  } catch (error: any) {
+    console.error('[Supabase] Error en Apple Sign-In:', error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+
 // ─── INSTANCIA DEL CLIENTE ────────────────────────────────────────────────────
 
 export const supabase: SupabaseClient = createClient(

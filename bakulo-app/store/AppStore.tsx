@@ -30,6 +30,7 @@ import {
   db_saveMeal,
   db_saveMedication,
   db_getCurrentUser,
+  db_setCurrentUser,
   AppUser,
 } from '@/service/database';
 import { authGetCurrentUser } from '@/service/authService';
@@ -242,10 +243,7 @@ const DEMO_NOTIFICATIONS: NotificationEntry[] = [
 
 // Al arrancar: si hay usuario logueado cargamos vacío (se llenará con Supabase pull).
 // Si no hay usuario mostramos los datos de demo para que la UI no esté vacía.
-// FIX: db_getCurrentUser() puede fallar si initDatabase() aún no corrió.
-// Envolvemos en try/catch para que el módulo cargue sin errores.
-let hasLocalUser = false;
-try { hasLocalUser = !!db_getCurrentUser(); } catch { hasLocalUser = false; }
+const hasLocalUser = !!db_getCurrentUser();
 const INITIAL_ENTRIES:        AnyEntry[]           = hasLocalUser ? [] : DEMO_ENTRIES;
 const INITIAL_NOTIFICATIONS:  NotificationEntry[]  = hasLocalUser ? [] : DEMO_NOTIFICATIONS;
 
@@ -362,10 +360,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   });
   const [tasks,       setTasks]       = useState<Task[]>(INITIAL_TASKS);
   const [completions, setCompletions] = useState<TaskCompletion[]>(INITIAL_COMPLETIONS);
-  const [currentUser, setCurrentUserState] = useState<AppUser | null>(() => {
-    // CRÍTICO: initDatabase() puede no haber corrido aún → proteger con try/catch
-    try { return db_getCurrentUser(); } catch { return null; }
-  });
+  const [currentUser, setCurrentUserState] = useState<AppUser | null>(() => db_getCurrentUser());
 
   // Cargar usuario al montar (sync local) y luego refrescar desde Supabase
   useEffect(() => {
@@ -388,6 +383,25 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   // ── Carga los datos del usuario desde Supabase al hacer login ─────────────
   const loadUserData = useCallback(async () => {
     try {
+      // 1. Carga instantánea de SQLite local (sin esperar red)
+      const localUser = (() => { try { return db_getCurrentUser(); } catch { return null; } })();
+      if (localUser) setCurrentUserState(localUser);
+
+      // 2. Verificación en segundo plano con Supabase
+      //    Si hay sesión activa → actualizar datos del usuario (avatar, nombre)
+      try {
+        const { supabase } = await import('@/service/supabaseClient');
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const remote = await authGetCurrentUser();
+          if (remote) {
+            setCurrentUserState(remote);
+            try { db_setCurrentUser(remote); } catch {} // Actualiza SQLite con datos frescos
+          }
+        }
+      } catch { /* sin red — continuar con datos locales */ }
+
+      // 3. Pull de datos de salud desde Supabase
       const { pullFromSupabase } = await import('@/service/syncService');
       const remote = await pullFromSupabase();
 
@@ -462,10 +476,8 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
         loadUserData();
       }
     } catch {
-      try {
-        const local = db_getCurrentUser();
-        if (local) setCurrentUserState(local);
-      } catch { /* DB aún no inicializada — ignorar */ }
+      const local = db_getCurrentUser();
+      if (local) setCurrentUserState(local);
     }
   }, [loadUserData]);
 
