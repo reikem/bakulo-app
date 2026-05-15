@@ -56,9 +56,22 @@ export function generateToken(length = 32): string {
 export const initDatabase = (): void => {
   const database = getDb();
 
-  database.execSync(`
-    PRAGMA journal_mode = WAL;
+  // FIX: expo-sqlite v14+ no soporta múltiples statements en un solo execSync.
+  // Cada CREATE TABLE debe ejecutarse por separado.
+  // FIX: user_preferences debe crearse ANTES de cualquier función que la use.
 
+  database.execSync('PRAGMA journal_mode = WAL;');
+
+  // ── Tablas principales (orden importa: primero las que otros dependen) ─────
+
+  database.execSync(`
+    CREATE TABLE IF NOT EXISTS user_preferences (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `);
+
+  database.execSync(`
     CREATE TABLE IF NOT EXISTS users (
       id               TEXT PRIMARY KEY,
       username         TEXT UNIQUE NOT NULL,
@@ -71,8 +84,10 @@ export const initDatabase = (): void => {
       reset_token      TEXT,
       reset_expires_at DATETIME,
       created_at       DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
+    )
+  `);
 
+  database.execSync(`
     CREATE TABLE IF NOT EXISTS glucose_entries (
       id          TEXT PRIMARY KEY,
       value       INTEGER NOT NULL,
@@ -83,8 +98,10 @@ export const initDatabase = (): void => {
       timestamp   DATETIME NOT NULL,
       synced      INTEGER DEFAULT 0,
       created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
+    )
+  `);
 
+  database.execSync(`
     CREATE TABLE IF NOT EXISTS exercise_entries (
       id               TEXT PRIMARY KEY,
       activity         TEXT NOT NULL,
@@ -94,8 +111,10 @@ export const initDatabase = (): void => {
       timestamp        DATETIME NOT NULL,
       synced           INTEGER DEFAULT 0,
       created_at       DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
+    )
+  `);
 
+  database.execSync(`
     CREATE TABLE IF NOT EXISTS meal_entries (
       id         TEXT PRIMARY KEY,
       name       TEXT NOT NULL,
@@ -109,8 +128,10 @@ export const initDatabase = (): void => {
       timestamp  DATETIME NOT NULL,
       synced     INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
+    )
+  `);
 
+  database.execSync(`
     CREATE TABLE IF NOT EXISTS medication_entries (
       id         TEXT PRIMARY KEY,
       med_name   TEXT NOT NULL,
@@ -121,8 +142,10 @@ export const initDatabase = (): void => {
       timestamp  DATETIME NOT NULL,
       synced     INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
+    )
+  `);
 
+  database.execSync(`
     CREATE TABLE IF NOT EXISTS repository_documents (
       id          TEXT PRIMARY KEY,
       name        TEXT NOT NULL,
@@ -135,19 +158,18 @@ export const initDatabase = (): void => {
       uploaded_at DATETIME NOT NULL,
       synced      INTEGER DEFAULT 0,
       created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
+    )
+  `);
 
-    CREATE TABLE IF NOT EXISTS user_preferences (
-      key   TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-
+  database.execSync(`
     CREATE TABLE IF NOT EXISTS security_logs (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       event_type TEXT NOT NULL,
       event_date DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
+    )
+  `);
 
+  database.execSync(`
     CREATE TABLE IF NOT EXISTS sync_queue (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       table_name TEXT NOT NULL,
@@ -155,20 +177,32 @@ export const initDatabase = (): void => {
       operation  TEXT NOT NULL,
       payload    TEXT NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
+    )
   `);
 
-  // ── Migraciones — agrega columnas nuevas si la DB ya existía ─────────────
-  // ALTER TABLE solo falla si la columna YA existe; ignoramos ese error.
-  const migrations = [
-    `ALTER TABLE users ADD COLUMN activated        INTEGER  DEFAULT 0`,
-    `ALTER TABLE users ADD COLUMN activation_token TEXT`,
-    `ALTER TABLE users ADD COLUMN reset_token      TEXT`,
-    `ALTER TABLE users ADD COLUMN reset_expires_at DATETIME`,
-  ];
-  for (const sql of migrations) {
-    try { database.execSync(sql); } catch { /* columna ya existe — OK */ }
-  }
+  // ── Migraciones seguras — verifica si la columna existe antes de agregarla ─
+  // FIX: en lugar de try/catch (que puede no capturar bien en expo-sqlite),
+  // consultamos pragma_table_info para verificar si la columna existe.
+
+  const _hasColumn = (table: string, col: string): boolean => {
+    try {
+      const rows = database.getAllSync<{ name: string }>(
+        `SELECT name FROM pragma_table_info(?) WHERE name = ?`, [table, col]
+      );
+      return rows.length > 0;
+    } catch { return true; } // asumir que existe si no podemos verificar
+  };
+
+  const _addColumn = (sql: string, table: string, col: string): void => {
+    if (!_hasColumn(table, col)) {
+      try { database.execSync(sql); } catch (e) { /* ignorar */ }
+    }
+  };
+
+  _addColumn(`ALTER TABLE users ADD COLUMN activated        INTEGER  DEFAULT 0`, 'users', 'activated');
+  _addColumn(`ALTER TABLE users ADD COLUMN activation_token TEXT`,                'users', 'activation_token');
+  _addColumn(`ALTER TABLE users ADD COLUMN reset_token      TEXT`,                'users', 'reset_token');
+  _addColumn(`ALTER TABLE users ADD COLUMN reset_expires_at DATETIME`,            'users', 'reset_expires_at');
 
   // ── Usuario de prueba jaime ────────────────────────────────────────────────
   const existing = database.getFirstSync<{ id: string }>(
@@ -448,21 +482,30 @@ export const db_saveMedication = (entry: {
 
 // ─── REPOSITORY DOCUMENTS ────────────────────────────────────────────────────
 
+// UUID v4 validator — Supabase rechaza IDs tipo "doc_1777326795366_liex"
+function _isValidUUID(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+}
+
 export const db_saveDocument = (doc: {
   id: string; name: string; type: string; uri: string;
   base64?: string; sizeBytes?: number; tags?: string; description?: string;
   uploadedAt: Date;
 }) => {
+  // FIX: si el ID no es UUID v4 válido, generar uno nuevo
+  // Esto evita: "invalid input syntax for type uuid" en Supabase
+  const safeId = _isValidUUID(doc.id) ? doc.id : generateUUID();
+
   getDb().runSync(
     `INSERT OR REPLACE INTO repository_documents
      (id, name, type, uri, base64, size_bytes, tags, description, uploaded_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [doc.id, doc.name, doc.type, doc.uri,
+    [safeId, doc.name, doc.type, doc.uri,
      doc.base64 ?? null, doc.sizeBytes ?? 0,
      doc.tags ?? null, doc.description ?? null,
      doc.uploadedAt.toISOString()]
   );
-  _enqueue('repository_documents', doc.id, 'INSERT', { ...doc, base64: null });
+  _enqueue('repository_documents', safeId, 'INSERT', { ...doc, id: safeId, base64: null });
 };
 
 export const db_getDocuments = (): any[] =>
