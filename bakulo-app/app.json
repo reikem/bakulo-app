@@ -72,6 +72,14 @@
         {
           "photosPermission": "Serenity necesita acceso a tus fotos para adjuntar imágenes."
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26
+          }
+        }
       ]
     ],
     "experiments": {

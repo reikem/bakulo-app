@@ -20,11 +20,59 @@ const API_KEY       = 'YOUR_API_KEY';
 // ─── DB SINGLETON — exportado para que otros archivos puedan usarlo ──────────
 
 let _db: SQLite.SQLiteDatabase | null = null;
+let _initialized = false;
 
-/** Retorna (y crea si no existe) la instancia de la base de datos. */
+/** Retorna (y crea si no existe) la instancia de la base de datos.
+ *  AUTO-INIT: llama initDatabase() la primera vez si aún no se hizo.
+ *  Esto garantiza que las tablas existan ANTES de cualquier query,
+ *  sin importar el orden de evaluación de módulos en React Native.
+ */
 export function getDb(): SQLite.SQLiteDatabase {
-  if (!_db) _db = SQLite.openDatabaseSync('serenity.db');
+  if (!_db) {
+    _db = SQLite.openDatabaseSync('serenity.db');
+  }
+  if (!_initialized) {
+    _initialized = true;
+    // Auto-init sincrónico — crea todas las tablas si no existen
+    _bootstrapTables(_db);
+  }
   return _db;
+}
+
+/** Crea las tablas esenciales de forma segura e idempotente.
+ *  Se llama automáticamente en el primer getDb().
+ *  También se puede llamar manualmente desde initDatabase().
+ */
+function _bootstrapTables(database: SQLite.SQLiteDatabase): void {
+  try {
+    database.execSync('PRAGMA journal_mode = WAL;');
+    // user_preferences PRIMERO — es la más usada en arranque
+    database.execSync(`CREATE TABLE IF NOT EXISTS user_preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+    database.execSync(`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, display_name TEXT NOT NULL, email TEXT UNIQUE, avatar_url TEXT, activated INTEGER DEFAULT 0, activation_token TEXT, reset_token TEXT, reset_expires_at DATETIME, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+    database.execSync(`CREATE TABLE IF NOT EXISTS glucose_entries (id TEXT PRIMARY KEY, value INTEGER NOT NULL, source TEXT NOT NULL, device_name TEXT, note TEXT, completed INTEGER DEFAULT 1, timestamp DATETIME NOT NULL, synced INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+    database.execSync(`CREATE TABLE IF NOT EXISTS exercise_entries (id TEXT PRIMARY KEY, activity TEXT NOT NULL, duration_minutes INTEGER NOT NULL, note TEXT, completed INTEGER DEFAULT 1, timestamp DATETIME NOT NULL, synced INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+    database.execSync(`CREATE TABLE IF NOT EXISTS meal_entries (id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, calories INTEGER DEFAULT 0, carbs INTEGER DEFAULT 0, protein INTEGER DEFAULT 0, fat INTEGER DEFAULT 0, image_uri TEXT, completed INTEGER DEFAULT 1, timestamp DATETIME NOT NULL, synced INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+    database.execSync(`CREATE TABLE IF NOT EXISTS medication_entries (id TEXT PRIMARY KEY, med_name TEXT NOT NULL, med_type TEXT NOT NULL, dosage TEXT NOT NULL, zone TEXT, completed INTEGER DEFAULT 1, timestamp DATETIME NOT NULL, synced INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+    database.execSync(`CREATE TABLE IF NOT EXISTS repository_documents (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, uri TEXT NOT NULL, base64 TEXT, size_bytes INTEGER DEFAULT 0, tags TEXT, description TEXT, uploaded_at DATETIME NOT NULL, synced INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+    database.execSync(`CREATE TABLE IF NOT EXISTS security_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT NOT NULL, event_date DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+    database.execSync(`CREATE TABLE IF NOT EXISTS sync_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, table_name TEXT NOT NULL, record_id TEXT NOT NULL, operation TEXT NOT NULL, payload TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+    // Migraciones seguras
+    _safeAddColumn(database, 'users', 'activated',        `ALTER TABLE users ADD COLUMN activated        INTEGER  DEFAULT 0`);
+    _safeAddColumn(database, 'users', 'activation_token', `ALTER TABLE users ADD COLUMN activation_token TEXT`);
+    _safeAddColumn(database, 'users', 'reset_token',      `ALTER TABLE users ADD COLUMN reset_token      TEXT`);
+    _safeAddColumn(database, 'users', 'reset_expires_at', `ALTER TABLE users ADD COLUMN reset_expires_at DATETIME`);
+  } catch (e: any) {
+    console.warn('[DB] _bootstrapTables error:', e?.message ?? e);
+  }
+}
+
+function _safeAddColumn(database: SQLite.SQLiteDatabase, table: string, col: string, sql: string): void {
+  try {
+    const rows = database.getAllSync<{ name: string }>(
+      `SELECT name FROM pragma_table_info(?) WHERE name = ?`, [table, col]
+    );
+    if (rows.length === 0) database.execSync(sql);
+  } catch { /* columna ya existe o tabla no existe aún */ }
 }
 
 // ─── UUID v4 sin dependencias externas ────────────────────────────────────────
@@ -534,10 +582,23 @@ export const db_getPreference = (key: string): string | null => {
 
 // ─── SECURITY ────────────────────────────────────────────────────────────────
 
-export const db_logSecurityEvent = (
-  type: 'password_change' | 'login' | 'biometric' | '2fa_setup' | 'register' | 'reset_password'
-) => {
-  getDb().runSync('INSERT INTO security_logs (event_type) VALUES (?)', [type]);
+export type SecurityEventType =
+  | 'password_change'
+  | 'login'
+  | 'biometric'
+  | 'biometric_enabled'
+  | '2fa_setup'
+  | 'register'
+  | 'reset_password'
+  | 'ai_config_update'
+  | 'logout';
+
+export const db_logSecurityEvent = (type: SecurityEventType) => {
+  try {
+    getDb().runSync('INSERT INTO security_logs (event_type) VALUES (?)', [type]);
+  } catch (e) {
+    console.warn('[DB] logSecurityEvent error:', e);
+  }
 };
 
 // ─── SYNC QUEUE ──────────────────────────────────────────────────────────────

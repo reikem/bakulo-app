@@ -30,7 +30,6 @@ import {
   db_saveMeal,
   db_saveMedication,
   db_getCurrentUser,
-  db_setCurrentUser,
   AppUser,
 } from '@/service/database';
 import { authGetCurrentUser } from '@/service/authService';
@@ -243,7 +242,13 @@ const DEMO_NOTIFICATIONS: NotificationEntry[] = [
 
 // Al arrancar: si hay usuario logueado cargamos vacío (se llenará con Supabase pull).
 // Si no hay usuario mostramos los datos de demo para que la UI no esté vacía.
-const hasLocalUser = !!db_getCurrentUser();
+// FIX: No llamar db_getCurrentUser() en module scope.
+// Con getDb() auto-init esto ya funciona, pero por seguridad
+// lo lazy-evaluamos dentro de una función.
+function _safeHasLocalUser(): boolean {
+  try { return !!db_getCurrentUser(); } catch { return false; }
+}
+const hasLocalUser = _safeHasLocalUser();
 const INITIAL_ENTRIES:        AnyEntry[]           = hasLocalUser ? [] : DEMO_ENTRIES;
 const INITIAL_NOTIFICATIONS:  NotificationEntry[]  = hasLocalUser ? [] : DEMO_NOTIFICATIONS;
 
@@ -383,25 +388,6 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   // ── Carga los datos del usuario desde Supabase al hacer login ─────────────
   const loadUserData = useCallback(async () => {
     try {
-      // 1. Carga instantánea de SQLite local (sin esperar red)
-      const localUser = (() => { try { return db_getCurrentUser(); } catch { return null; } })();
-      if (localUser) setCurrentUserState(localUser);
-
-      // 2. Verificación en segundo plano con Supabase
-      //    Si hay sesión activa → actualizar datos del usuario (avatar, nombre)
-      try {
-        const { supabase } = await import('@/service/supabaseClient');
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          const remote = await authGetCurrentUser();
-          if (remote) {
-            setCurrentUserState(remote);
-            try { db_setCurrentUser(remote); } catch {} // Actualiza SQLite con datos frescos
-          }
-        }
-      } catch { /* sin red — continuar con datos locales */ }
-
-      // 3. Pull de datos de salud desde Supabase
       const { pullFromSupabase } = await import('@/service/syncService');
       const remote = await pullFromSupabase();
 
