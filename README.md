@@ -9,7 +9,21 @@
 
 ---
 
-### 📥 [Descargar Serenity APK (Última Versión)](https://github.com/reikem/bakulo-app/releases/download/v1.0.0/app-debug.apk)
+### Método A: Escaneo Directo (Recomendado)
+Apunta la cámara de tu teléfono al siguiente código QR para acceder al instalador empaquetado mediante Expo EAS:
+
+<p align="center">
+  <img src="./assets/readme/qr-code.png" width="220" alt="Código QR de instalación Serenity">
+</p>
+
+### Método B: Descarga desde GitHub Releases
+Si lo prefieres, puedes descargar directamente el binario ejecutable compilado accediendo a la sección de lanzamientos:
+
+👉 📥 **[Descargar Serenity APK (Última Versión)](https://github.com/reikem/bakulo-app/releases/tag/v1.0.1)**
+
+> 💡 **Nota de instalación:** Al tratarse de una compilación independiente fuera de Google Play Store, tu dispositivo Android te pedirá activar temporalmente el permiso de *"Instalar aplicaciones de fuentes desconocidas"* al abrir el archivo `.apk`.
+
+---
 
 # 🎯 Características Principales e Innovaciones
 
