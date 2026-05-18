@@ -14,6 +14,7 @@
     },
     "ios": {
       "supportsTablet": false,
+      "version": "1.0.1",
       "bundleIdentifier": "com.serenity.health",
       "usesAppleSignIn": true,
       "infoPlist": {
@@ -28,6 +29,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#004e63"
       },
+      "versionCode": 1,
       "package": "com.serenity.health",
       "permissions": [
         "android.permission.CAMERA",
