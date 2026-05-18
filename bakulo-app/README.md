@@ -8,6 +8,7 @@
 **Serenity** es una solución móvil de código abierto diseñada para transformar la gestión de la salud y el monitoreo crónico (como el control de la diabetes). Nuestra misión es eliminar la fricción del seguimiento diario mediante la automatización de hardware, persistencia híbrida offline-first, diagnóstico en tiempo real y seguridad proactiva ante emergencias médicas.
 
 ---
+### 📥 [Descargar Serenity APK (Última Versión)](https://github.com/reikem/bakulo-app/releases/download/v1.0.0/app-debug.apk)
 
 # 🎯 Características Principales e Innovaciones
 

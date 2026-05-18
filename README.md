@@ -9,6 +9,8 @@
 
 ---
 
+### 📥 [Descargar Serenity APK (Última Versión)](https://github.com/reikem/bakulo-app/releases/download/v1.0.0/app-debug.apk)
+
 # 🎯 Características Principales e Innovaciones
 
 ## 🔌 Conectividad de Hardware e Integración de Sensores
